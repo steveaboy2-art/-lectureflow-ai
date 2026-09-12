@@ -176,7 +176,6 @@ export default async (req: Request) => {
           mime_type: mimeType
         }
       ],
-      background: true,
       response_format: {
         type: 'text',
         mime_type: 'application/json',

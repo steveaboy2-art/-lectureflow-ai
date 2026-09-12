@@ -174,10 +174,48 @@ async function getAudioDurationMinutes(file){
   });
 }
 async function uploadDirectToGemini(file,uploadUrl){
-  const response=await fetch(uploadUrl,{method:'POST',headers:{'X-Goog-Upload-Offset':'0','X-Goog-Upload-Command':'upload, finalize','Content-Type':file.type||'audio/mpeg'},body:file});
-  const text=await response.text();let data={};try{data=JSON.parse(text)}catch{}
-  if(!response.ok)throw new Error(data?.error?.message||text||'Audio upload failed');
-  return data;
+  const chunkSize=2*1024*1024;
+  let offset=0;
+
+  while(offset<file.size){
+    const end=Math.min(offset+chunkSize,file.size);
+    const chunk=file.slice(offset,end);
+    const finalChunk=end===file.size;
+
+    const response=await fetch('/api/gemini-upload-init',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/octet-stream',
+        'x-lectureflow-upload-url':uploadUrl,
+        'x-lectureflow-upload-offset':String(offset),
+        'x-lectureflow-upload-final':finalChunk?'1':'0'
+      },
+      body:chunk
+    });
+
+    const text=await response.text();
+    let data={};
+
+    try{
+      data=JSON.parse(text);
+    }catch{}
+
+    if(!response.ok){
+      throw new Error(
+        data?.error ||
+        text ||
+        'Audio upload failed'
+      );
+    }
+
+    if(finalChunk){
+      return data;
+    }
+
+    offset=end;
+  }
+
+  throw new Error('Audio upload did not finish.');
 }
 async function waitForGeminiFile(fileName){
   if(!fileName)return;

@@ -1,0 +1,10 @@
+{
+  "name": "LectureFlow MBBS",
+  "short_name": "LectureFlow",
+  "description": "Turn daily medical lectures into structured notes, revision sheets and active recall.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f6f9",
+  "theme_color": "#2e6f62",
+  "icons": []
+}

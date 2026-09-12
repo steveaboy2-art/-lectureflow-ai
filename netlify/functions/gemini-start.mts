@@ -8,17 +8,38 @@ const NOTES_SCHEMA = {
     revisionNotes: { type: 'string' },
     fullNotes: {
       type: 'array',
-      items: { type: 'object', properties: { h: { type: 'string' }, p: { type: 'string' } }, required: ['h', 'p'] }
+      items: {
+        type: 'object',
+        properties: {
+          h: { type: 'string' },
+          p: { type: 'string' }
+        },
+        required: ['h', 'p']
+      }
     },
     professor: { type: 'array', items: { type: 'string' } },
     mustKnow: { type: 'array', items: { type: 'string' } },
     questions: {
       type: 'array',
-      items: { type: 'object', properties: { q: { type: 'string' }, a: { type: 'string' } }, required: ['q', 'a'] }
+      items: {
+        type: 'object',
+        properties: {
+          q: { type: 'string' },
+          a: { type: 'string' }
+        },
+        required: ['q', 'a']
+      }
     },
     viva: {
       type: 'array',
-      items: { type: 'object', properties: { q: { type: 'string' }, a: { type: 'string' } }, required: ['q', 'a'] }
+      items: {
+        type: 'object',
+        properties: {
+          q: { type: 'string' },
+          a: { type: 'string' }
+        },
+        required: ['q', 'a']
+      }
     },
     mcqs: {
       type: 'array',
@@ -26,17 +47,38 @@ const NOTES_SCHEMA = {
         type: 'object',
         properties: {
           q: { type: 'string' },
-          options: { type: 'array', items: { type: 'string' } },
+          options: {
+            type: 'array',
+            items: { type: 'string' }
+          },
           answer: { type: 'string' },
           explanation: { type: 'string' }
         },
         required: ['q', 'options', 'answer', 'explanation']
       }
     },
-    confusingAreas: { type: 'array', items: { type: 'string' } },
-    topicsToReadMore: { type: 'array', items: { type: 'string' } }
+    confusingAreas: {
+      type: 'array',
+      items: { type: 'string' }
+    },
+    topicsToReadMore: {
+      type: 'array',
+      items: { type: 'string' }
+    }
   },
-  required: ['transcript', 'summary', 'revisionNotes', 'fullNotes', 'professor', 'mustKnow', 'questions', 'viva', 'mcqs', 'confusingAreas', 'topicsToReadMore']
+  required: [
+    'transcript',
+    'summary',
+    'revisionNotes',
+    'fullNotes',
+    'professor',
+    'mustKnow',
+    'questions',
+    'viva',
+    'mcqs',
+    'confusingAreas',
+    'topicsToReadMore'
+  ]
 };
 
 const STUDY_PROMPT = `You are LectureFlow, an expert MBBS lecture study assistant.
@@ -69,14 +111,29 @@ OUTPUT:
 11. topicsToReadMore: items the lecturer mentioned but did not fully explain, suitable for later textbook reading.`;
 
 export default async (req: Request) => {
-  if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+  if (req.method !== 'POST') {
+    return new Response('Method not allowed', { status: 405 });
+  }
 
-  const apiKey = Netlify.env.get('GEMINI_API_KEY');
-  const baseUrl = Netlify.env.get('GOOGLE_GEMINI_BASE_URL');
-  if (!apiKey || !baseUrl) return Response.json({ error: 'Netlify AI Gateway is unavailable.' }, { status: 503 });
+  const apiKey = Netlify.env.get('LECTUREFLOW_GEMINI_API_KEY');
+
+  if (!apiKey) {
+    return Response.json(
+      { error: 'Gemini API key is not configured.' },
+      { status: 503 }
+    );
+  }
 
   let body: any;
-  try { body = await req.json(); } catch { return Response.json({ error: 'Invalid request.' }, { status: 400 }); }
+
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json(
+      { error: 'Invalid request.' },
+      { status: 400 }
+    );
+  }
 
   const fileUri = String(body?.fileUri || '');
   const mimeType = String(body?.mimeType || 'audio/mpeg');
@@ -85,35 +142,79 @@ export default async (req: Request) => {
   const lectureDate = String(body?.date || '').slice(0, 20);
 
   if (!fileUri.startsWith('https://') && !fileUri.startsWith('http://')) {
-    return Response.json({ error: 'Missing Gemini file URI.' }, { status: 400 });
+    return Response.json(
+      { error: 'Missing Gemini file URI.' },
+      { status: 400 }
+    );
   }
 
-  const prompt = `Subject: ${subject}\nLecture title: ${title}\nLecture date: ${lectureDate}\n\n${STUDY_PROMPT}`;
-  const endpoint = `${baseUrl.replace(/\/$/, '')}/v1beta/interactions`;
+  const prompt =
+    `Subject: ${subject}\n` +
+    `Lecture title: ${title}\n` +
+    `Lecture date: ${lectureDate}\n\n` +
+    STUDY_PROMPT;
+
+  const endpoint =
+    'https://generativelanguage.googleapis.com/v1beta/interactions';
 
   const upstream = await fetch(endpoint, {
     method: 'POST',
-    headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+    headers: {
+      'x-goog-api-key': apiKey,
+      'Content-Type': 'application/json'
+    },
     body: JSON.stringify({
       model: 'gemini-3.8-flash',
       input: [
-        { type: 'text', text: prompt },
-        { type: 'audio', uri: fileUri, mime_type: mimeType }
+        {
+          type: 'text',
+          text: prompt
+        },
+        {
+          type: 'audio',
+          uri: fileUri,
+          mime_type: mimeType
+        }
       ],
       background: true,
-      response_format: { type: 'text', mime_type: 'application/json', schema: NOTES_SCHEMA }
+      response_format: {
+        type: 'text',
+        mime_type: 'application/json',
+        schema: NOTES_SCHEMA
+      }
     })
   });
 
   const data = await upstream.json().catch(() => ({}));
+
   if (!upstream.ok) {
-    return Response.json({ error: data?.error?.message || 'Gemini could not start processing.', detail: data }, { status: 502 });
+    console.error('Gemini interaction start failed:', {
+      status: upstream.status,
+      data
+    });
+
+    return Response.json(
+      {
+        error:
+          data?.error?.message ||
+          'Gemini could not start processing.',
+        detail: data
+      },
+      { status: 502 }
+    );
   }
 
-  return Response.json({ interactionId: data.id, status: data.status || 'in_progress' });
+  return Response.json({
+    interactionId: data.id,
+    status: data.status || 'in_progress'
+  });
 };
 
 export const config = {
   path: '/api/gemini-start',
-  rateLimit: { windowLimit: 20, windowSize: 60, aggregateBy: 'ip' }
+  rateLimit: {
+    windowLimit: 20,
+    windowSize: 60,
+    aggregateBy: 'ip'
+  }
 };

@@ -1,3 +1,14 @@
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    registrations.forEach((registration) => registration.unregister());
+  });
+}
+
+if ('caches' in window) {
+  caches.keys().then((keys) => {
+    keys.forEach((key) => caches.delete(key));
+  });
+}
 const SUBJECTS = ['Medicine','Surgery','Ophthalmology','ENT','Pediatrics','Orthopedics','OBG','Dermatology','Psychiatry','Other'];
 
 const seedLectures = [
@@ -315,4 +326,3 @@ function renderSearch(q){q=q.trim().toLowerCase();const results=!q?state.lecture
 el('sideStreak').textContent=`${state.streak} day streak`;
 setHeader('today');
 renderToday();
-if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));}

@@ -1,12 +1,22 @@
 declare const Netlify: { env: { get(name: string): string | undefined } };
 
 const ALLOWED_AUDIO_TYPES = new Set([
-  'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/m4a',
-  'audio/wav', 'audio/x-wav', 'audio/webm', 'audio/ogg', 'audio/aac'
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/m4a',
+  'audio/wav',
+  'audio/webm',
+  'audio/ogg',
+  'audio/aac',
+  'audio/flac',
+  'audio/aiff',
+  'audio/opus'
 ]);
 
 function cleanName(name: string) {
-  return String(name || 'lecture-audio').replace(/[\r\n\t]/g, ' ').slice(0, 140);
+  return String(name || 'lecture-audio')
+    .replace(/[\r\n\t]/g, ' ')
+    .slice(0, 140);
 }
 
 export default async (req: Request) => {
@@ -28,23 +38,51 @@ export default async (req: Request) => {
   try {
     body = await req.json();
   } catch {
-    return Response.json({ error: 'Invalid request.' }, { status: 400 });
+    return Response.json(
+      { error: 'Invalid request.' },
+      { status: 400 }
+    );
   }
 
   const size = Number(body?.size || 0);
   const fileName = cleanName(body?.fileName);
-  const mimeType = String(body?.mimeType || 'audio/mpeg').toLowerCase();
+
+  let mimeType = String(
+    body?.mimeType || 'audio/mpeg'
+  ).toLowerCase();
+
+  // Normalize Apple / browser MIME types
+  if (
+    mimeType === 'audio/x-m4a' ||
+    mimeType === 'audio/mp4' ||
+    fileName.toLowerCase().endsWith('.m4a')
+  ) {
+    mimeType = 'audio/m4a';
+  }
+
+  if (mimeType === 'audio/x-wav') {
+    mimeType = 'audio/wav';
+  }
 
   if (!Number.isFinite(size) || size <= 0) {
-    return Response.json({ error: 'Missing audio file size.' }, { status: 400 });
+    return Response.json(
+      { error: 'Missing audio file size.' },
+      { status: 400 }
+    );
   }
 
   if (size > 1024 * 1024 * 1024) {
-    return Response.json({ error: 'Audio file is too large.' }, { status: 413 });
+    return Response.json(
+      { error: 'Audio file is too large.' },
+      { status: 413 }
+    );
   }
 
-  if (!ALLOWED_AUDIO_TYPES.has(mimeType) && !mimeType.startsWith('audio/')) {
-    return Response.json({ error: 'Please upload an audio file.' }, { status: 415 });
+  if (!ALLOWED_AUDIO_TYPES.has(mimeType)) {
+    return Response.json(
+      { error: `Unsupported audio type: ${mimeType}` },
+      { status: 415 }
+    );
   }
 
   const endpoint =
@@ -68,7 +106,7 @@ export default async (req: Request) => {
   });
 
   if (!upstream.ok) {
-    const detail = (await upstream.text()).slice(0, 1000);
+    const detail = (await upstream.text()).slice(0, 1500);
 
     console.error('Gemini upload init failed:', {
       status: upstream.status,
@@ -77,20 +115,22 @@ export default async (req: Request) => {
 
     return Response.json(
       {
-        error: 'Could not start the Gemini audio upload.',
-        detail
+        error:
+          `Gemini upload failed — HTTP ${upstream.status}: ${detail}`
       },
       { status: 502 }
     );
   }
 
-  const uploadUrl = upstream.headers.get('x-goog-upload-url');
+  const uploadUrl =
+    upstream.headers.get('x-goog-upload-url');
 
   if (!uploadUrl) {
-    console.error('Gemini did not return x-goog-upload-url');
-
     return Response.json(
-      { error: 'Gemini did not return an upload URL.' },
+      {
+        error:
+          'Gemini accepted the request but did not return an upload URL.'
+      },
       { status: 502 }
     );
   }

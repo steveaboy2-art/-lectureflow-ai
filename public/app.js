@@ -78,6 +78,12 @@ let state = loadState();
 let currentView = 'today';
 let uploadFile = null;
 let activeQuiz = {lectureId:null,index:0,revealed:false};
+let mediaRecorder = null;
+let recorderStream = null;
+let recorderChunks = [];
+let recordingTimerId = null;
+let recordingSeconds = 0;
+let recordedAudioUrl = null;
 
 function loadState(){
   const saved = localStorage.getItem('lectureflow-state-v2');
@@ -133,8 +139,19 @@ function renderToday(){
 function renderUpload(){
   const date=getToday();
   el('view-upload').innerHTML=`<div class="upload-wrap"><div class="upload-card">
-    <div class="dropzone" id="dropzone"><div class="upload-symbol">♫</div><h3>Drop your lecture recording here</h3><p>MP3, M4A, WAV, AAC, OGG or WebM · tap to browse on iPhone/iPad</p><input id="audioFile" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.webm" /></div>
+    <div class="record-card" id="recordCard">
+      <div class="record-head"><div class="record-dot" id="recordDot"></div><div><h3>Record this lecture here</h3><p>Use your device microphone—no Voice Memos needed.</p></div><strong class="record-time" id="recordTimer">00:00</strong></div>
+      <div class="record-actions">
+        <button class="primary-btn record-btn" id="startRecordingBtn">● Start recording</button>
+        <button class="outline-btn record-btn" id="pauseRecordingBtn" disabled>Pause</button>
+        <button class="dark-btn record-btn" id="stopRecordingBtn" disabled>Stop & use recording</button>
+      </div>
+      <div class="record-status" id="recordingStatus">Keep this page open and your screen awake while recording.</div>
+    </div>
+    <div class="upload-divider"><span>OR UPLOAD A RECORDING</span></div>
+    <div class="dropzone" id="dropzone"<div class="upload-symbol">♫</div><h3>Drop your lecture recording here</h3><p>MP3, M4A, WAV, AAC, OGG or WebM · tap to browse on iPhone/iPad</p><input id="audioFile" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.webm" /></div>
     <div class="file-selected" id="fileSelected"><div class="file-badge">♪</div><div><strong id="fileName"></strong><small id="fileMeta"></small></div></div>
+    <audio id="recordingPreview" class="recording-preview" controls hidden></audio>
     <div class="form-grid"><div class="field"><label>SUBJECT</label><select id="subjectInput">${SUBJECTS.map(s=>`<option>${s}</option>`).join('')}</select></div><div class="field"><label>DATE</label><input id="dateInput" type="date" value="${date}" /></div><div class="field wide"><label>LECTURE TITLE</label><input id="titleInput" placeholder="e.g. Ocular motility and cover test" /></div></div>
     <button class="primary-btn" id="processBtn" disabled>Process lecture with Gemini</button><div id="processingArea"></div>
   </div><div class="section"><div class="panel"><h3>What LectureFlow creates</h3><div class="bar-list"><div class="bar-line"><span>Full notes</span><div class="bar-track"><span style="width:100%"></span></div><b>✓</b></div><div class="bar-line"><span>Revision sheet</span><div class="bar-track"><span style="width:100%"></span></div><b>✓</b></div><div class="bar-line"><span>Recall + viva</span><div class="bar-track"><span style="width:100%"></span></div><b>✓</b></div><div class="bar-line"><span>5 MCQs</span><div class="bar-track"><span style="width:100%"></span></div><b>✓</b></div><div class="bar-line"><span>Transcript</span><div class="bar-track"><span style="width:100%"></span></div><b>✓</b></div></div><p class="gateway-note">Powered by Gemini through secure Vercel Functions. Your audio goes to Gemini for processing; LectureFlow stores the generated study notes locally on this device.</p></div></div></div>`;
@@ -142,11 +159,106 @@ function renderUpload(){
   dz.addEventListener('click',()=>inp.click()); inp.addEventListener('change',()=>selectFile(inp.files[0]));
   ['dragenter','dragover'].forEach(e=>dz.addEventListener(e,x=>{x.preventDefault();dz.classList.add('drag')})); ['dragleave','drop'].forEach(e=>dz.addEventListener(e,x=>{x.preventDefault();dz.classList.remove('drag')})); dz.addEventListener('drop',e=>selectFile(e.dataTransfer.files[0]));
   el('titleInput').addEventListener('input',updateProcessButton); el('processBtn').addEventListener('click',processLectureReal);
+  el('startRecordingBtn').addEventListener('click',startWebsiteRecording);
+  el('pauseRecordingBtn').addEventListener('click',pauseResumeWebsiteRecording);
+  el('stopRecordingBtn').addEventListener('click',stopWebsiteRecording);
+  if(!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder==='undefined'){
+    el('startRecordingBtn').disabled=true;
+    el('recordingStatus').textContent='Recording is not supported in this browser. You can still upload a Voice Memo below.';
+  }
+}
+function bestRecorderMimeType(){
+  if(typeof MediaRecorder==='undefined' || !MediaRecorder.isTypeSupported)return '';
+  return ['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'].find(t=>MediaRecorder.isTypeSupported(t))||'';
+}
+function recorderExtension(type=''){
+  if(type.includes('mp4'))return 'm4a';
+  if(type.includes('ogg'))return 'ogg';
+  return 'webm';
+}
+function setRecorderButtons(mode){
+  const start=el('startRecordingBtn'), pause=el('pauseRecordingBtn'), stop=el('stopRecordingBtn'), dot=el('recordDot');
+  if(!start||!pause||!stop)return;
+  const active=mode==='recording'||mode==='paused';
+  start.disabled=active;
+  pause.disabled=!active;
+  stop.disabled=!active;
+  pause.textContent=mode==='paused'?'Resume':'Pause';
+  dot.classList.toggle('live',mode==='recording');
+  dot.classList.toggle('paused',mode==='paused');
+}
+function updateRecordingTimer(){
+  const timer=el('recordTimer');if(!timer)return;
+  const mins=String(Math.floor(recordingSeconds/60)).padStart(2,'0');
+  const secs=String(recordingSeconds%60).padStart(2,'0');
+  timer.textContent=`${mins}:${secs}`;
+}
+function stopRecorderTracks(){
+  recorderStream?.getTracks().forEach(track=>track.stop());
+  recorderStream=null;
+}
+async function startWebsiteRecording(){
+  try{
+    recorderStream=await navigator.mediaDevices.getUserMedia({
+      audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}
+    });
+    recorderChunks=[];
+    recordingSeconds=0;updateRecordingTimer();
+    const mimeType=bestRecorderMimeType();
+    mediaRecorder=new MediaRecorder(recorderStream,mimeType?{mimeType,audioBitsPerSecond:64000}:{audioBitsPerSecond:64000});
+    mediaRecorder.addEventListener('dataavailable',event=>{if(event.data?.size)recorderChunks.push(event.data)});
+    mediaRecorder.addEventListener('stop',finishWebsiteRecording,{once:true});
+    mediaRecorder.addEventListener('error',event=>{
+      clearInterval(recordingTimerId);recordingTimerId=null;stopRecorderTracks();setRecorderButtons('idle');
+      el('recordingStatus').textContent=event?.error?.message||'Recording stopped because of a microphone error.';
+    });
+    mediaRecorder.start(1000);
+    recordingTimerId=setInterval(()=>{if(mediaRecorder?.state==='recording'){recordingSeconds++;updateRecordingTimer()}},1000);
+    setRecorderButtons('recording');
+    el('recordingStatus').textContent='Recording now… keep this page open and your screen awake.';
+  }catch(err){
+    stopRecorderTracks();setRecorderButtons('idle');
+    const denied=err?.name==='NotAllowedError'||err?.name==='PermissionDeniedError';
+    el('recordingStatus').textContent=denied?'Microphone access was blocked. Allow microphone access for this site and try again.':'Could not start the microphone. You can still upload a recording below.';
+  }
+}
+function pauseResumeWebsiteRecording(){
+  if(!mediaRecorder)return;
+  if(mediaRecorder.state==='recording'){
+    mediaRecorder.pause();setRecorderButtons('paused');el('recordingStatus').textContent='Recording paused.';
+  }else if(mediaRecorder.state==='paused'){
+    mediaRecorder.resume();setRecorderButtons('recording');el('recordingStatus').textContent='Recording resumed…';
+  }
+}
+function stopWebsiteRecording(){
+  if(!mediaRecorder || mediaRecorder.state==='inactive')return;
+  clearInterval(recordingTimerId);recordingTimerId=null;
+  mediaRecorder.stop();stopRecorderTracks();setRecorderButtons('idle');
+  el('recordingStatus').textContent='Finishing your recording…';
+}
+function finishWebsiteRecording(){
+  const type=mediaRecorder?.mimeType||recorderChunks[0]?.type||'audio/mp4';
+  const blob=new Blob(recorderChunks,{type});
+  recorderChunks=[];
+  if(!blob.size){
+    el('recordingStatus').textContent='Nothing was recorded. Please try again.';
+    return;
+  }
+  const stamp=new Date().toISOString().slice(0,16).replace('T','-').replace(':','');
+  const file=new File([blob],`lecture-recording-${stamp}.${recorderExtension(type)}`,{type,lastModified:Date.now()});
+  selectFile(file);
+  el('recordingStatus').textContent='Recording ready. Add a title below, then process it with Gemini.';
 }
 function selectFile(file){
   if(!file)return;
   if(!String(file.type||'').startsWith('audio/') && !/\.(m4a|mp3|wav|aac|ogg|webm)$/i.test(file.name||'')){toast('Please select an audio recording');return}
-  uploadFile=file;el('fileSelected').classList.add('show');el('fileName').textContent=file.name;el('fileMeta').textContent=`${(file.size/1024/1024).toFixed(1)} MB · ready to upload`;updateProcessButton()
+  uploadFile=file;el('fileSelected').classList.add('show');el('fileName').textContent=file.name;el('fileMeta').textContent=`${(file.size/1024/1024).toFixed(1)} MB · ready to upload`;
+  const preview=el('recordingPreview');
+  if(preview){
+    if(recordedAudioUrl)URL.revokeObjectURL(recordedAudioUrl);
+    recordedAudioUrl=URL.createObjectURL(file);preview.src=recordedAudioUrl;preview.hidden=false;
+  }
+  updateProcessButton()
 }
 function updateProcessButton(){el('processBtn').disabled=!(uploadFile && el('titleInput').value.trim())}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}

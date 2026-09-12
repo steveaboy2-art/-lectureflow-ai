@@ -78,9 +78,14 @@ let state = loadState();
 let currentView = 'today';
 let uploadFile = null;
 let activeQuiz = {lectureId:null,index:0,revealed:false};
-let mediaRecorder = null;
 let recorderStream = null;
+let recorderAudioContext = null;
+let recorderSource = null;
+let recorderProcessor = null;
+let recorderMute = null;
+let recorderMp3Encoder = null;
 let recorderChunks = [];
+let recorderState = 'idle';
 let recordingTimerId = null;
 let recordingSeconds = 0;
 let recordedAudioUrl = null;
@@ -140,13 +145,13 @@ function renderUpload(){
   const date=getToday();
   el('view-upload').innerHTML=`<div class="upload-wrap"><div class="upload-card">
     <div class="record-card" id="recordCard">
-      <div class="record-head"><div class="record-dot" id="recordDot"></div><div><h3>Record this lecture here</h3><p>Use your device microphone—no Voice Memos needed.</p></div><strong class="record-time" id="recordTimer">00:00</strong></div>
+      <div class="record-head"><div class="record-dot" id="recordDot"></div><div><h3>Record this lecture here</h3><p>Use your device microphone—LectureFlow saves a real MP3.</p></div><strong class="record-time" id="recordTimer">00:00</strong></div>
       <div class="record-actions">
         <button class="primary-btn record-btn" id="startRecordingBtn">● Start recording</button>
         <button class="outline-btn record-btn" id="pauseRecordingBtn" disabled>Pause</button>
         <button class="dark-btn record-btn" id="stopRecordingBtn" disabled>Stop & use recording</button>
       </div>
-      <div class="record-status" id="recordingStatus">Keep this page open and your screen awake while recording.</div>
+      <div class="record-status" id="recordingStatus">Saved as MP3. Keep this page open and your screen awake while recording.</div>
     </div>
     <div class="upload-divider"><span>OR UPLOAD A RECORDING</span></div>
     <div class="dropzone" id="dropzone"<div class="upload-symbol">♫</div><h3>Drop your lecture recording here</h3><p>MP3, M4A, WAV, AAC, OGG or WebM · tap to browse on iPhone/iPad</p><input id="audioFile" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.webm" /></div>
@@ -162,19 +167,11 @@ function renderUpload(){
   el('startRecordingBtn').addEventListener('click',startWebsiteRecording);
   el('pauseRecordingBtn').addEventListener('click',pauseResumeWebsiteRecording);
   el('stopRecordingBtn').addEventListener('click',stopWebsiteRecording);
-  if(!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder==='undefined'){
+  const AudioContextClass=window.AudioContext||window.webkitAudioContext;
+  if(!navigator.mediaDevices?.getUserMedia || !AudioContextClass || !window.lamejs?.Mp3Encoder){
     el('startRecordingBtn').disabled=true;
-    el('recordingStatus').textContent='Recording is not supported in this browser. You can still upload a Voice Memo below.';
+    el('recordingStatus').textContent='The MP3 recorder could not load. Refresh once, or upload an MP3 below.';
   }
-}
-function bestRecorderMimeType(){
-  if(typeof MediaRecorder==='undefined' || !MediaRecorder.isTypeSupported)return '';
-  return ['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'].find(t=>MediaRecorder.isTypeSupported(t))||'';
-}
-function recorderExtension(type=''){
-  if(type.includes('mp4'))return 'm4a';
-  if(type.includes('ogg'))return 'ogg';
-  return 'webm';
 }
 function setRecorderButtons(mode){
   const start=el('startRecordingBtn'), pause=el('pauseRecordingBtn'), stop=el('stopRecordingBtn'), dot=el('recordDot');
@@ -193,61 +190,89 @@ function updateRecordingTimer(){
   const secs=String(recordingSeconds%60).padStart(2,'0');
   timer.textContent=`${mins}:${secs}`;
 }
-function stopRecorderTracks(){
+function floatTo16BitPcm(input){
+  const output=new Int16Array(input.length);
+  for(let i=0;i<input.length;i++){
+    const sample=Math.max(-1,Math.min(1,input[i]));
+    output[i]=sample<0?sample*0x8000:sample*0x7fff;
+  }
+  return output;
+}
+async function releaseRecorderResources(){
+  try{recorderProcessor?.disconnect()}catch{}
+  try{recorderSource?.disconnect()}catch{}
+  try{recorderMute?.disconnect()}catch{}
+  recorderProcessor=null;recorderSource=null;recorderMute=null;
   recorderStream?.getTracks().forEach(track=>track.stop());
   recorderStream=null;
+  if(recorderAudioContext && recorderAudioContext.state!=='closed'){
+    try{await recorderAudioContext.close()}catch{}
+  }
+  recorderAudioContext=null;
 }
 async function startWebsiteRecording(){
   try{
+    const AudioContextClass=window.AudioContext||window.webkitAudioContext;
+    if(!AudioContextClass || !window.lamejs?.Mp3Encoder)throw new Error('MP3 encoder unavailable');
     recorderStream=await navigator.mediaDevices.getUserMedia({
-      audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}
+      audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}
     });
+    recorderAudioContext=new AudioContextClass();
+    await recorderAudioContext.resume();
+    recorderSource=recorderAudioContext.createMediaStreamSource(recorderStream);
+    recorderProcessor=recorderAudioContext.createScriptProcessor(4096,1,1);
+    recorderMute=recorderAudioContext.createGain();
+    recorderMute.gain.value=0;
+    recorderMp3Encoder=new window.lamejs.Mp3Encoder(1,Math.round(recorderAudioContext.sampleRate),64);
     recorderChunks=[];
+    recorderState='recording';
+    recorderProcessor.onaudioprocess=event=>{
+      if(recorderState!=='recording')return;
+      const pcm=floatTo16BitPcm(event.inputBuffer.getChannelData(0));
+      const encoded=recorderMp3Encoder.encodeBuffer(pcm);
+      if(encoded.length)recorderChunks.push(new Uint8Array(encoded));
+    };
+    recorderSource.connect(recorderProcessor);
+    recorderProcessor.connect(recorderMute);
+    recorderMute.connect(recorderAudioContext.destination);
     recordingSeconds=0;updateRecordingTimer();
-    const mimeType=bestRecorderMimeType();
-    mediaRecorder=new MediaRecorder(recorderStream,mimeType?{mimeType,audioBitsPerSecond:64000}:{audioBitsPerSecond:64000});
-    mediaRecorder.addEventListener('dataavailable',event=>{if(event.data?.size)recorderChunks.push(event.data)});
-    mediaRecorder.addEventListener('stop',finishWebsiteRecording,{once:true});
-    mediaRecorder.addEventListener('error',event=>{
-      clearInterval(recordingTimerId);recordingTimerId=null;stopRecorderTracks();setRecorderButtons('idle');
-      el('recordingStatus').textContent=event?.error?.message||'Recording stopped because of a microphone error.';
-    });
-    mediaRecorder.start(1000);
-    recordingTimerId=setInterval(()=>{if(mediaRecorder?.state==='recording'){recordingSeconds++;updateRecordingTimer()}},1000);
+    recordingTimerId=setInterval(()=>{if(recorderState==='recording'){recordingSeconds++;updateRecordingTimer()}},1000);
     setRecorderButtons('recording');
-    el('recordingStatus').textContent='Recording now… keep this page open and your screen awake.';
+    el('recordingStatus').textContent='Recording MP3 now… keep this page open and your screen awake.';
   }catch(err){
-    stopRecorderTracks();setRecorderButtons('idle');
+    recorderState='idle';await releaseRecorderResources();setRecorderButtons('idle');
     const denied=err?.name==='NotAllowedError'||err?.name==='PermissionDeniedError';
-    el('recordingStatus').textContent=denied?'Microphone access was blocked. Allow microphone access for this site and try again.':'Could not start the microphone. You can still upload a recording below.';
+    el('recordingStatus').textContent=denied?'Microphone access was blocked. Allow microphone access for this site and try again.':'Could not start the MP3 recorder. Refresh once, or upload an MP3 below.';
   }
 }
 function pauseResumeWebsiteRecording(){
-  if(!mediaRecorder)return;
-  if(mediaRecorder.state==='recording'){
-    mediaRecorder.pause();setRecorderButtons('paused');el('recordingStatus').textContent='Recording paused.';
-  }else if(mediaRecorder.state==='paused'){
-    mediaRecorder.resume();setRecorderButtons('recording');el('recordingStatus').textContent='Recording resumed…';
+  if(recorderState==='recording'){
+    recorderState='paused';setRecorderButtons('paused');el('recordingStatus').textContent='Recording paused.';
+  }else if(recorderState==='paused'){
+    recorderState='recording';setRecorderButtons('recording');el('recordingStatus').textContent='Recording MP3 resumed…';
   }
 }
-function stopWebsiteRecording(){
-  if(!mediaRecorder || mediaRecorder.state==='inactive')return;
+async function stopWebsiteRecording(){
+  if(!['recording','paused'].includes(recorderState))return;
+  recorderState='stopping';
   clearInterval(recordingTimerId);recordingTimerId=null;
-  mediaRecorder.stop();stopRecorderTracks();setRecorderButtons('idle');
-  el('recordingStatus').textContent='Finishing your recording…';
+  el('recordingStatus').textContent='Finishing your MP3…';
+  const finalBytes=recorderMp3Encoder?.flush();
+  if(finalBytes?.length)recorderChunks.push(new Uint8Array(finalBytes));
+  await releaseRecorderResources();
+  finishWebsiteRecording();
 }
 function finishWebsiteRecording(){
-  const type=mediaRecorder?.mimeType||recorderChunks[0]?.type||'audio/mp4';
-  const blob=new Blob(recorderChunks,{type});
-  recorderChunks=[];
+  const blob=new Blob(recorderChunks,{type:'audio/mpeg'});
+  recorderChunks=[];recorderMp3Encoder=null;recorderState='idle';setRecorderButtons('idle');
   if(!blob.size){
     el('recordingStatus').textContent='Nothing was recorded. Please try again.';
     return;
   }
   const stamp=new Date().toISOString().slice(0,16).replace('T','-').replace(':','');
-  const file=new File([blob],`lecture-recording-${stamp}.${recorderExtension(type)}`,{type,lastModified:Date.now()});
+  const file=new File([blob],`lecture-recording-${stamp}.mp3`,{type:'audio/mpeg',lastModified:Date.now()});
   selectFile(file);
-  el('recordingStatus').textContent='Recording ready. Add a title below, then process it with Gemini.';
+  el('recordingStatus').textContent='MP3 ready. Add a title below, then process it with Gemini.';
 }
 function selectFile(file){
   if(!file)return;

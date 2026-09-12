@@ -1,1 +1,1 @@
-Triggering Vercel deployment after Git integration.
+Redeploy LectureFlow after configuring Vercel production environment.

@@ -157,54 +157,103 @@ export async function POST(req: Request) {
   const endpoint =
     'https://generativelanguage.googleapis.com/v1beta/interactions';
 
-  const upstream = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'x-goog-api-key': apiKey,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'gemini-3.8-flash',
-      input: [
-        {
-          type: 'text',
-          text: prompt
-        },
-        {
-          type: 'audio',
-          uri: fileUri,
-          mime_type: mimeType
-        }
-      ],
-      response_format: {
+  const models = [
+    'gemini-3.8-flash',
+    'gemini-3.7-flash',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite'
+  ];
+
+  const requestPayload = {
+    input: [
+      {
         type: 'text',
-        mime_type: 'application/json',
-        schema: NOTES_SCHEMA
+        text: prompt
+      },
+      {
+        type: 'audio',
+        uri: fileUri,
+        mime_type: mimeType
       }
-    })
-  });
+    ],
+    response_format: {
+      type: 'text',
+      mime_type: 'application/json',
+      schema: NOTES_SCHEMA
+    }
+  };
 
-  const data = await upstream.json().catch(() => ({}));
+  let lastMessage = 'Gemini is temporarily unavailable.';
+  const attemptedModels: string[] = [];
 
-  if (!upstream.ok) {
-    console.error('Gemini interaction start failed:', {
-      status: upstream.status,
-      data
+  for (let index = 0; index < models.length; index++) {
+    const model = models[index];
+    attemptedModels.push(model);
+
+    const upstream = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': apiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model,
+        ...requestPayload
+      })
     });
 
-    return Response.json(
-      {
-        error:
-          data?.error?.message ||
-          'Gemini could not start processing.',
-        detail: data
-      },
-      { status: 502 }
-    );
+    const data = await upstream.json().catch(() => ({}));
+
+    if (upstream.ok && data.id) {
+      return Response.json({
+        interactionId: data.id,
+        status: data.status || 'in_progress',
+        model
+      });
+    }
+
+    lastMessage =
+      data?.error?.message ||
+      data?.errors?.[0]?.message ||
+      `Gemini returned HTTP ${upstream.status}.`;
+
+    const retryable =
+      upstream.status === 429 ||
+      upstream.status === 500 ||
+      upstream.status === 502 ||
+      upstream.status === 503 ||
+      upstream.status === 504 ||
+      /high demand|overload|unavailable|resource exhausted|try again|capacity/i.test(lastMessage);
+
+    console.error('Gemini model attempt failed:', {
+      model,
+      status: upstream.status,
+      message: lastMessage,
+      retryable
+    });
+
+    if (!retryable) {
+      return Response.json(
+        {
+          error: lastMessage,
+          attemptedModels
+        },
+        { status: 502 }
+      );
+    }
+
+    if (index < models.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 500 * (index + 1)));
+    }
   }
 
-  return Response.json({
-    interactionId: data.id,
-    status: data.status || 'in_progress'
-  });
+  return Response.json(
+    {
+      error:
+        'Gemini is busy across all available Flash models. Your audio is already uploaded—please tap Try again in a minute.',
+      detail: lastMessage,
+      attemptedModels
+    },
+    { status: 503 }
+  );
 }

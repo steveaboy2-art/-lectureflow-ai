@@ -10,6 +10,7 @@ export async function GET(req: Request) {
   return Response.json({
     ok: Boolean(apiKey),
     provider: 'Gemini API direct',
-    model: 'gemini-3.8-flash'
+    model: 'gemini-3.8-flash',
+    fallbacks: ['gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite']
   });
 }

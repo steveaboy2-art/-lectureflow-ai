@@ -116,14 +116,40 @@ let recordingTimerId = null;
 let recordingSeconds = 0;
 let recordedAudioUrl = null;
 
+const DEFAULT_STATE = {
+  lectures: [],
+  streak: 0,
+  processedTotal: 0,
+  settings: {
+    aiProvider: 'Gemini via Vercel Functions',
+    driveFolder: 'MBBS/Lecture Recordings',
+    notesFolder: 'MBBS/Lecture Notes'
+  }
+};
+
 function loadState(){
-  const saved = localStorage.getItem('lectureflow-state-v2');
-  if(saved){ try { return JSON.parse(saved); } catch(e){} }
-  const s = {lectures:[], streak:0, processedTotal:0, settings:{aiProvider:'Gemini via Vercel Functions', driveFolder:'MBBS/Lecture Recordings', notesFolder:'MBBS/Lecture Notes'}};
-  localStorage.setItem('lectureflow-state-v2', JSON.stringify(s));
-  return s;
+  const fallback = JSON.parse(JSON.stringify(DEFAULT_STATE));
+  try {
+    const raw = localStorage.getItem('lectureflow-state-v2');
+    if(!raw) {
+      localStorage.setItem('lectureflow-state-v2', JSON.stringify(fallback));
+      return fallback;
+    }
+    const parsed = JSON.parse(raw);
+    const safe = parsed && typeof parsed === 'object' ? parsed : {};
+    return {
+      ...fallback,
+      ...safe,
+      lectures: Array.isArray(safe.lectures) ? safe.lectures : [],
+      settings: {...fallback.settings, ...(safe.settings && typeof safe.settings === 'object' ? safe.settings : {})}
+    };
+  } catch(e) {
+    return fallback;
+  }
 }
-function saveState(){localStorage.setItem('lectureflow-state-v2',JSON.stringify(state));}
+function saveState(){
+  try { localStorage.setItem('lectureflow-state-v2', JSON.stringify(state)); } catch(e) {}
+}
 function fmtDate(dateStr){return new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric'}).format(new Date(dateStr+'T12:00:00'));}
 function dateParts(dateStr){const d=new Date(dateStr+'T12:00:00');return {day:d.getDate(),mon:d.toLocaleString('en',{month:'short'}).toUpperCase()};}
 function getToday(){
@@ -162,7 +188,7 @@ function renderToday(){
   el('view-today').innerHTML=`
     <div class="hero"><div class="hero-grid"><div><h2>${today.length ? `${today.length} lectures from today` : 'Stay caught up every day'}</h2><p>${today.length ? `Your lecture material is organized and ready. ${done}/${today.length} are marked learned — finish the rest before tomorrow.` : 'Upload your class recording and LectureFlow will turn it into structured study material.'}</p></div><button class="hero-btn" data-goto="upload">+ Add lecture</button></div></div>
     <div class="section"><div class="section-head"><div><h2>Today’s lectures</h2><p>Read what was taught, then test yourself.</p></div><button class="text-btn" data-goto="library">View library</button></div><div class="cards-grid">${today.map(lectureCard).join('')}</div></div>
-    <div class="section"><div class="quick-grid"><div class="recall-card"><div class="quick-label">DAILY RECALL</div><h3>Mix today’s questions</h3><p>Active recall across all ${today.length} lectures, without seeing the answer first.</p><button class="dark-btn" id="dailyRecallBtn">Start daily recall</button></div><div class="night-card"><div class="quick-label">5-MIN NIGHT REVISION</div><h3>${today.reduce((a,l)=>a+l.mustKnow.length,0)} must-know points</h3><p>Only the highest-yield facts from everything you learned today.</p><button class="dark-btn" id="nightRevisionBtn">Review now</button></div></div></div>
+    <div class="section"><div class="quick-grid"><div class="recall-card"><div class="quick-label">DAILY RECALL</div><h3>Mix today’s questions</h3><p>Active recall across all ${today.length} lectures, without seeing the answer first.</p><button class="dark-btn" id="dailyRecallBtn">Start daily recall</button></div><div class="night-card"><div class="quick-label">5-MIN NIGHT REVISION</div><h3>${today.reduce((a,l)=>a+(Array.isArray(l.mustKnow)?l.mustKnow.length:0),0)} must-know points</h3><p>Only the highest-yield facts from everything you learned today.</p><button class="dark-btn" id="nightRevisionBtn">Review now</button></div></div></div>
     <div class="section"><div class="section-head"><div><h2>Today at a glance</h2></div></div><div class="stats-row"><div class="stat-card"><div class="stat-value">${today.length}</div><div class="stat-label">Lectures processed</div></div><div class="stat-card"><div class="stat-value">${Math.round(today.reduce((a,l)=>a+l.duration,0)/60*10)/10}h</div><div class="stat-label">Lecture time</div></div><div class="stat-card"><div class="stat-value">${done}/${today.length}</div><div class="stat-label">Marked learned</div></div><div class="stat-card"><div class="stat-value">${state.streak}</div><div class="stat-label">Day streak</div><div class="stat-trend">Keep it alive today</div></div></div></div>`;
   wireCommon(); el('dailyRecallBtn')?.addEventListener('click',startDailyRecall); el('nightRevisionBtn')?.addEventListener('click',showNightRevision);
 }

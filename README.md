@@ -66,3 +66,4 @@ The Gemini model name is an environment variable so you can change models withou
 ## Next upgrade
 
 Replace localStorage calls in `app.js` with a repository module using `@supabase/supabase-js`, then replace `processLectureDemo()` with a POST to your server endpoint.
+

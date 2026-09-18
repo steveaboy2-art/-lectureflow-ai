@@ -89,6 +89,7 @@ async function relayUploadChunk(
   });
 
   const text = await upstream.text();
+  const upstreamOffset = upstream.headers.get('x-goog-upload-offset');
 
   if (!upstream.ok) {
     console.error('Gemini chunk upload failed:', {
@@ -119,9 +120,13 @@ async function relayUploadChunk(
     }
   }
 
+  const nextOffset = Number(upstreamOffset);
+
   return Response.json({
     ok: true,
-    nextOffset: offset + bytes.byteLength
+    nextOffset: Number.isFinite(nextOffset)
+      ? nextOffset
+      : offset + bytes.byteLength
   });
 }
 

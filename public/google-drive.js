@@ -19,7 +19,14 @@
 
   function renderDriveCard() {
     const view = document.getElementById('googleDriveMount') || document.getElementById('view-settings');
-    if (!view || view.querySelector('#googleDriveCard')) return;
+    if (!view) return;
+    const existing = view.querySelector('#googleDriveCard');
+    if (existing) {
+      const btn = existing.querySelector('#connectDriveBtn');
+      if (btn && !btn.dataset.driveBound) { btn.dataset.driveBound='1'; btn.addEventListener('click', connectDrive); }
+      updateDriveUI();
+      return;
+    }
     const card = document.createElement('div');
     card.className = 'settings-card';
     card.id = 'googleDriveCard';

@@ -347,6 +347,14 @@ async function getAudioDurationMinutes(file){
     audio.preload='metadata';audio.onloadedmetadata=()=>finish(Number.isFinite(audio.duration)?Math.max(1,Math.round(audio.duration/60)):0);audio.onerror=()=>finish(0);audio.src=url;setTimeout(()=>finish(0),3500);
   });
 }
+async function readApiResponse(res){
+  const raw=await res.text();
+  if(!raw)return {};
+  try{return JSON.parse(raw)}
+  catch{
+    throw new Error(`Server returned HTTP ${res.status} with a non-JSON response: ${raw.slice(0,300)}`);
+  }
+}
 async function uploadAudioAsGeminiFiles(file){
   // Safari/iPad cannot reliably call Gemini's resumable upload URL directly.
   // Send small final chunks through our Vercel function. Each chunk becomes
@@ -362,13 +370,26 @@ async function uploadAudioAsGeminiFiles(file){
     const partName=file.name+'-part-'+String(index+1).padStart(3,'0');
 
     el('processMessage').textContent='Uploading audio part '+(index+1)+' of '+total+'…';
-    const initRes=await fetch('/api/gemini-upload-init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:partName,mimeType:normalizedAudioMime(file),size:chunk.size})});
-    const init=await initRes.json();
-    if(!initRes.ok)throw new Error(apiError(init,'Could not start audio upload'));
+    const initRes=await fetch('/api/gemini-upload-init',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({fileName:partName,mimeType:normalizedAudioMime(file),size:chunk.size})
+    });
+    const init=await readApiResponse(initRes);
+    if(!initRes.ok)throw new Error(apiError(init,`Could not start audio upload (HTTP ${initRes.status})`));
 
-    const uploadRes=await fetch('/api/gemini-upload-init',{method:'POST',headers:{'x-lectureflow-upload-url':init.uploadUrl,'x-lectureflow-upload-offset':'0','x-lectureflow-upload-final':'1','Content-Type':'application/octet-stream'},body:chunk});
-    const uploaded=await uploadRes.json().catch(()=>({}));
-    if(!uploadRes.ok)throw new Error(apiError(uploaded,'Could not upload audio part'));
+    const uploadRes=await fetch('/api/gemini-upload-init',{
+      method:'POST',
+      headers:{
+        'x-lectureflow-upload-url':init.uploadUrl,
+        'x-lectureflow-upload-offset':'0',
+        'x-lectureflow-upload-final':'1',
+        'Content-Type':'application/octet-stream'
+      },
+      body:chunk
+    });
+    const uploaded=await readApiResponse(uploadRes);
+    if(!uploadRes.ok)throw new Error(apiError(uploaded,`Could not upload audio part (HTTP ${uploadRes.status})`));
     const fileInfo=uploaded?.file||uploaded;
     if(!fileInfo?.uri)throw new Error('Gemini uploaded part '+(index+1)+' but did not return a file reference.');
     files.push({uri:fileInfo.uri,name:fileInfo.name,mimeType:fileInfo.mimeType||normalizedAudioMime(file)});

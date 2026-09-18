@@ -17,6 +17,17 @@ const NOTES_SCHEMA = {
         required: ['h', 'p']
       }
     },
+    lectureOnlyNotes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          h: { type: 'string' },
+          p: { type: 'string' }
+        },
+        required: ['h', 'p']
+      }
+    },
     professor: { type: 'array', items: { type: 'string' } },
     mustKnow: { type: 'array', items: { type: 'string' } },
     questions: {
@@ -71,6 +82,7 @@ const NOTES_SCHEMA = {
     'summary',
     'revisionNotes',
     'fullNotes',
+    'lectureOnlyNotes',
     'professor',
     'mustKnow',
     'questions',
@@ -102,13 +114,14 @@ OUTPUT:
 2. summary: a concise overview of everything covered.
 3. revisionNotes: a 5-10 minute high-yield revision sheet.
 4. fullNotes: detailed lecture-order notes with clear headings. Include definitions, classifications, mechanisms/pathogenesis, clinical features, investigations, treatment, complications and clinical examples whenever the lecturer discusses them.
-5. professor: points explicitly stressed, repeated, called important, or framed as likely exam/viva points.
-6. mustKnow: the highest-yield facts from this lecture.
-7. questions: exactly 10 short-answer active-recall questions with answers.
-8. viva: exactly 5 viva-style questions with concise model answers.
-9. mcqs: exactly 5 single-best-answer MCQs, each with 4 options, the correct answer, and a short explanation.
-10. confusingAreas: concepts from THIS lecture that are easy to confuse, clarified briefly.
-11. topicsToReadMore: items the lecturer mentioned but did not fully explain, suitable for later textbook reading.`;
+5. lectureOnlyNotes: a strict, source-faithful record of ONLY what the lecturer actually said or clearly taught. Do not add textbook facts, outside knowledge, inferred details, corrections, or missing links. Preserve the lecturer's sequence. Clean filler and repetition, but keep all medically relevant teaching. If a statement is genuinely unclear, write [Unclear in recording]. This section is the source of truth for what was taught in the lecture.
+6. professor: points explicitly stressed, repeated, called important, or framed as likely exam/viva points.
+7. mustKnow: the highest-yield facts from this lecture.
+8. questions: exactly 10 short-answer active-recall questions with answers.
+9. viva: exactly 5 viva-style questions with concise model answers.
+10. mcqs: exactly 5 single-best-answer MCQs, each with 4 options, the correct answer, and a short explanation.
+11. confusingAreas: concepts from THIS lecture that are easy to confuse, clarified briefly.
+12. topicsToReadMore: items the lecturer mentioned but did not fully explain, suitable for later textbook reading.`;
 
 export async function POST(req: Request) {
   if (req.method !== 'POST') {

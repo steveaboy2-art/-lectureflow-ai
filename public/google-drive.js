@@ -3,7 +3,7 @@
   const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
   let tokenClient = null;
   let accessToken = null;
-  // Google OAuth client IDs are public browser identifiers; keeping this local avoids a fragile config fetch on iPad Safari.\n  let clientId = '14663212067-eb2lvc5qorg89vdgeod530ssaoaa2d1f.apps.googleusercontent.com';
+  const clientId = '14663212067-eb2lvc5qorg89vdgeod530ssaoaa2d1f.apps.googleusercontent.com';
   let saving = false;
 
   const esc = (s='') => String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));

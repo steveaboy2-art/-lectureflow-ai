@@ -174,15 +174,17 @@ export async function POST(req: Request) {
     );
   }
 
-  const fileUri = String(body?.fileUri || '');
   const mimeType = String(body?.mimeType || 'audio/mpeg');
+  const fileUris = Array.isArray(body?.fileUris)
+    ? body.fileUris.map((uri: any) => String(uri || '')).filter(Boolean)
+    : [String(body?.fileUri || '')].filter(Boolean);
   const subject = String(body?.subject || 'Medicine').slice(0, 80);
   const title = String(body?.title || 'Untitled lecture').slice(0, 180);
   const lectureDate = String(body?.date || '').slice(0, 20);
 
-  if (!fileUri.startsWith('https://') && !fileUri.startsWith('http://')) {
+  if (!fileUris.length || fileUris.some(uri => !uri.startsWith('https://') && !uri.startsWith('http://'))) {
     return Response.json(
-      { error: 'Missing Gemini file URI.' },
+      { error: 'Missing Gemini audio file URI(s).' },
       { status: 400 }
     );
   }
@@ -208,13 +210,15 @@ export async function POST(req: Request) {
     input: [
       {
         type: 'text',
-        text: prompt
+        text: prompt + (fileUris.length > 1
+          ? '\\n\\nThe audio is provided as sequential file parts in order. Treat part 1, part 2, part 3, etc. as one continuous lecture recording. Preserve continuity across boundaries and do not repeat content merely because a boundary occurs.'
+          : '')
       },
-      {
+      ...fileUris.map(uri => ({
         type: 'audio',
-        uri: fileUri,
+        uri,
         mime_type: mimeType
-      }
+      })),
     ],
     response_format: {
       type: 'text',

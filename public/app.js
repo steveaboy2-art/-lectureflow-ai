@@ -146,14 +146,7 @@ function navigate(view){
   currentView=view; document.querySelectorAll('.view').forEach(v=>v.classList.remove('active')); el('view-'+view).classList.add('active');
   document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view)); setHeader(view); render(view); window.scrollTo({top:0,behavior:'smooth'});
 }
-document.addEventListener('click',(event)=>{
-  const nav=event.target.closest('[data-view]');
-  if(nav){
-    event.preventDefault();
-    const view=nav.dataset.view;
-    if(view) navigate(view);
-  }
-});
+document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.view)));
 
 function lectureCard(l){
   return `<article class="lecture-card" data-open="${l.id}">

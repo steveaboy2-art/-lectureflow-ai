@@ -18,7 +18,7 @@
   }
 
   function renderDriveCard() {
-    const view = document.getElementById('view-settings');
+    const view = document.getElementById('googleDriveMount') || document.getElementById('view-settings');
     if (!view || view.querySelector('#googleDriveCard')) return;
     const card = document.createElement('div');
     card.className = 'settings-card';

@@ -347,92 +347,7 @@ async function getAudioDurationMinutes(file){
     audio.preload='metadata';audio.onloadedmetadata=()=>finish(Number.isFinite(audio.duration)?Math.max(1,Math.round(audio.duration/60)):0);audio.onerror=()=>finish(0);audio.src=url;setTimeout(()=>finish(0),3500);
   });
 }
-async function uploadDirectToGemini(file,uploadUrl){
-  // Gemini's resumable uploader requires every non-final chunk to be an
-  // exact multiple of its 8 MiB chunk granularity. Vercel Functions have a
-  // 4.5 MB request-body limit, so audio chunks must go directly from the
-  // browser to Gemini instead of being relayed through our API function.
-  const chunkSize=8*1024*1024;
-  let offset=0;
-  let retries=0;
-
-  while(offset<file.size){
-    const end=Math.min(offset+chunkSize,file.size);
-    const chunk=file.slice(offset,end);
-    const finalChunk=end===file.size;
-
-    let response=null;
-    let lastNetworkError=null;
-    for(let attempt=0;attempt<4;attempt++){
-      try{
-        response=await fetch(uploadUrl,{
-          method:'POST',
-          headers:{
-            'X-Goog-Upload-Offset':String(offset),
-            'X-Goog-Upload-Command':finalChunk?'upload, finalize':'upload'
-          },
-          body:chunk
-        });
-        break;
-      }catch(err){
-        lastNetworkError=err;
-        await sleep(500*(attempt+1));
-      }
-    }
-
-    if(!response){
-      throw new Error('Could not reach Gemini directly from this device. Please keep the page open and try the upload again.');
-    }
-
-    const text=await response.text();
-    let data={};
-    try{data=JSON.parse(text);}catch{}
-
-    if(!response.ok){
-      const serverOffset=Number(
-        response.headers.get('x-goog-upload-offset') ||
-        data?.serverOffset
-      );
-
-      if(Number.isFinite(serverOffset) && serverOffset>=0 && serverOffset<=file.size && retries<5){
-        offset=serverOffset;
-        retries++;
-        await sleep(300*retries);
-        continue;
-      }
-
-      throw new Error(
-        data?.error ||
-        text ||
-        `Gemini audio upload failed — HTTP ${response.status}`
-      );
-    }
-
-    retries=0;
-
-    if(finalChunk){
-      try{return JSON.parse(text);}catch{
-        throw new Error('Gemini finished the upload but returned an unreadable response.');
-      }
-    }
-
-    // Gemini's successful upload response does not reliably include
-    // X-Goog-Upload-Offset. Since we sent the entire chunk and the request
-    // succeeded, the next offset is the end of this chunk.
-    const serverNextOffset=Number(
-      response.headers.get('x-goog-upload-offset')
-    );
-
-    if(Number.isFinite(serverNextOffset) && serverNextOffset>offset && serverNextOffset<=file.size){
-      offset=serverNextOffset;
-    }else{
-      offset=end;
-    }
-  }
-
-  throw new Error('Audio upload did not finish.');
-}
-async function waitForGeminiFile(fileName){
+async function uploadAudioAsGeminiFiles(file){\n  // Safari/iPad cannot reliably call Gemini's resumable upload URL directly.\n  // Send small final chunks through our Vercel function. Each chunk becomes\n  // its own completed Gemini File, avoiding both CORS and chunk-granularity issues.\n  const chunkSize=3*1024*1024;\n  const total=Math.ceil(file.size/chunkSize);\n  const files=[];\n\n  for(let index=0;index<total;index++){\n    const start=index*chunkSize;\n    const end=Math.min(start+chunkSize,file.size);\n    const chunk=file.slice(start,end);\n    const partName=file.name+'-part-'+String(index+1).padStart(3,'0');\n\n    el('processMessage').textContent='Uploading audio part '+(index+1)+' of '+total+'…';\n    const initRes=await fetch('/api/gemini-upload-init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:partName,mimeType:normalizedAudioMime(file),size:chunk.size})});\n    const init=await initRes.json();\n    if(!initRes.ok)throw new Error(apiError(init,'Could not start audio upload'));\n\n    const uploadRes=await fetch('/api/gemini-upload-init',{method:'POST',headers:{'x-lectureflow-upload-url':init.uploadUrl,'x-lectureflow-upload-offset':'0','x-lectureflow-upload-final':'1','Content-Type':'application/octet-stream'},body:chunk});\n    const uploaded=await uploadRes.json().catch(()=>({}));\n    if(!uploadRes.ok)throw new Error(apiError(uploaded,'Could not upload audio part'));\n    const fileInfo=uploaded?.file||uploaded;\n    if(!fileInfo?.uri)throw new Error('Gemini uploaded part '+(index+1)+' but did not return a file reference.');\n    files.push({uri:fileInfo.uri,name:fileInfo.name,mimeType:fileInfo.mimeType||normalizedAudioMime(file)});\n  }\n  return files;\n}\nasync function waitForGeminiFile(fileName){
   if(!fileName)return;
   for(let i=0;i<40;i++){
     const r=await fetch(`/api/gemini-file-status?name=${encodeURIComponent(fileName)}`);const d=await r.json();
@@ -478,20 +393,18 @@ async function processLectureReal(){
     if(!health.ok)throw new Error('Gemini is not active on this Vercel project yet. Make sure LECTUREFLOW_GEMINI_API_KEY is configured.');
     const duration=await getAudioDurationMinutes(file);
 
-    setActiveStep(0,'Creating secure upload…');
-    const initRes=await fetch('/api/gemini-upload-init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:file.name,mimeType:normalizedAudioMime(file),size:file.size})});
-    const init=await initRes.json();if(!initRes.ok)throw new Error(apiError(init,'Could not start audio upload'));
-    const uploaded=await uploadDirectToGemini(file,init.uploadUrl);
-    const fileInfo=uploaded?.file||uploaded;
-    if(!fileInfo?.uri)throw new Error('Gemini uploaded the audio but did not return a file reference.');
-    markStep(0,'done','Uploaded');
+    setActiveStep(0,'Uploading audio parts…');
+    const audioFiles=await uploadAudioAsGeminiFiles(file);
+    markStep(0,'done','Uploaded '+audioFiles.length+' part'+(audioFiles.length===1?'':'s'));
 
     setActiveStep(1,'Preparing audio…');
-    if(fileInfo.name)await waitForGeminiFile(fileInfo.name);
+    for(const audioFile of audioFiles){
+      if(audioFile.name)await waitForGeminiFile(audioFile.name);
+    }
     markStep(1,'done','Ready');
 
     setActiveStep(2,'Gemini is listening…');
-    const startRes=await fetch('/api/gemini-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileUri:fileInfo.uri,mimeType:fileInfo.mimeType||normalizedAudioMime(file),subject,title,date})});
+    const startRes=await fetch('/api/gemini-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileUris:audioFiles.map(x=>x.uri),mimeType:normalizedAudioMime(file),subject,title,date})});
     const started=await startRes.json();if(!startRes.ok||!started.interactionId)throw new Error(apiError(started,'Could not start lecture processing'));
     const result=await pollInteraction(started.interactionId);
     markStep(2,'done','Notes complete');markStep(3,'done','Revision ready');markStep(4,'done','Questions ready');

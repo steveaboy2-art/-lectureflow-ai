@@ -154,7 +154,7 @@ function renderUpload(){
       <div class="record-status" id="recordingStatus">Saved as MP3. Keep this page open and your screen awake while recording.</div>
     </div>
     <div class="upload-divider"><span>OR UPLOAD A RECORDING</span></div>
-    <div class="dropzone" id="dropzone"<div class="upload-symbol">♫</div><h3>Drop your lecture recording here</h3><p>MP3, M4A, WAV, AAC, OGG or WebM · tap to browse on iPhone/iPad</p><input id="audioFile" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.webm" /></div>
+    <div class="dropzone" id="dropzone"><div class="upload-symbol">♫</div><h3>Drop your lecture recording here</h3><p>MP3, M4A, WAV, AAC, OGG or WebM · tap to browse on iPhone/iPad</p><input id="audioFile" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.webm" /></div>
     <div class="file-selected" id="fileSelected"><div class="file-badge">♪</div><div><strong id="fileName"></strong><small id="fileMeta"></small></div></div>
     <audio id="recordingPreview" class="recording-preview" controls hidden></audio>
     <div class="form-grid"><div class="field"><label>SUBJECT</label><select id="subjectInput">${SUBJECTS.map(s=>`<option>${s}</option>`).join('')}</select></div><div class="field"><label>DATE</label><input id="dateInput" type="date" value="${date}" /></div><div class="field wide"><label>LECTURE TITLE</label><input id="titleInput" placeholder="e.g. Ocular motility and cover test" /></div></div>
@@ -274,6 +274,17 @@ function finishWebsiteRecording(){
   selectFile(file);
   el('recordingStatus').textContent='MP3 ready. Add a title below, then process it with Gemini.';
 }
+function normalizedAudioMime(file){
+  const name=String(file?.name||'').toLowerCase();
+  const type=String(file?.type||'').toLowerCase();
+  if(name.endsWith('.m4a')||type==='audio/x-m4a'||type==='audio/mp4')return 'audio/m4a';
+  if(name.endsWith('.mp3')||type==='audio/mp3'||type==='audio/mpeg')return 'audio/mpeg';
+  if(name.endsWith('.wav')||type==='audio/x-wav'||type==='audio/wav')return 'audio/wav';
+  if(name.endsWith('.aac')||type==='audio/aac')return 'audio/aac';
+  if(name.endsWith('.ogg')||type==='audio/ogg')return 'audio/ogg';
+  if(name.endsWith('.webm')||type==='audio/webm')return 'audio/webm';
+  return type.startsWith('audio/')?type:'audio/mpeg';
+}
 function selectFile(file){
   if(!file)return;
   if(!String(file.type||'').startsWith('audio/') && !/\.(m4a|mp3|wav|aac|ogg|webm)$/i.test(file.name||'')){toast('Please select an audio recording');return}
@@ -314,7 +325,7 @@ async function uploadDirectToGemini(file,uploadUrl){
   // Stay well below Vercel's 4.5 MB function request limit.
   // The server also returns Gemini's authoritative offset so a transient
   // mismatch can be recovered without restarting a long lecture upload.
-  const chunkSize=4*1024*1024;
+  const chunkSize=3*1024*1024;
   let offset=0;
   let retries=0;
 
@@ -412,7 +423,7 @@ async function processLectureReal(){
     const duration=await getAudioDurationMinutes(file);
 
     setActiveStep(0,'Creating secure upload…');
-    const initRes=await fetch('/api/gemini-upload-init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:file.name,mimeType:file.type||'audio/mpeg',size:file.size})});
+    const initRes=await fetch('/api/gemini-upload-init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:file.name,mimeType:normalizedAudioMime(file),size:file.size})});
     const init=await initRes.json();if(!initRes.ok)throw new Error(apiError(init,'Could not start audio upload'));
     const uploaded=await uploadDirectToGemini(file,init.uploadUrl);
     const fileInfo=uploaded?.file||uploaded;
@@ -424,7 +435,7 @@ async function processLectureReal(){
     markStep(1,'done','Ready');
 
     setActiveStep(2,'Gemini is listening…');
-    const startRes=await fetch('/api/gemini-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileUri:fileInfo.uri,mimeType:fileInfo.mimeType||file.type||'audio/mpeg',subject,title,date})});
+    const startRes=await fetch('/api/gemini-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileUri:fileInfo.uri,mimeType:fileInfo.mimeType||normalizedAudioMime(file),subject,title,date})});
     const started=await startRes.json();if(!startRes.ok||!started.interactionId)throw new Error(apiError(started,'Could not start lecture processing'));
     const result=await pollInteraction(started.interactionId);
     markStep(2,'done','Notes complete');markStep(3,'done','Revision ready');markStep(4,'done','Questions ready');

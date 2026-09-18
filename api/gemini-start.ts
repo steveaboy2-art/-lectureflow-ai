@@ -103,6 +103,26 @@ const SUBJECT_TEXTBOOKS = {
   'Gynaecology':'Dutta’s Textbook of Gynaecology'
 };
 
+const SUBJECT_STUDY_STYLE = {
+'Anatomy':'Build from applied anatomy and relations to clinical relevance; cover boundaries, attachments, relations, blood supply, nerve supply, lymphatics and applied anatomy when relevant.',
+'Physiology':'Explain normal mechanisms as a connected cause-and-effect story; emphasize regulation, graphs, relationships, normal values and clinical correlation.',
+'Biochemistry':'Connect pathways to substrates, enzymes, regulation, energetics and clinical significance; emphasize rate-limiting steps and important clinical correlations.',
+'Pathology':'Use definition → etiology → pathogenesis → morphology → clinical features → investigations → complications/prognosis when appropriate. Give pathogenesis enough depth for exam writing.',
+'Pharmacology':'Organize by class and prototype, then mechanism → effects → uses → adverse effects → contraindications/precautions → interactions; emphasize important comparisons and rational combinations.',
+'Microbiology':'Use organism → morphology/classification → virulence/pathogenesis → disease → specimen/diagnosis → treatment/prevention; preserve laboratory principles.',
+'Forensic Medicine & Toxicology':'Use medico-legal definitions, findings, interpretation and management where applicable; for poisons cover source, mechanism, clinical features, diagnosis and specific management.',
+'General Medicine':'Use definition/etiology → pathophysiology → clinical presentation → examination → investigations → diagnosis/differentials → management → complications and follow-up.',
+'General Surgery':'Use definition/etiology → pathology → clinical presentation → examination → investigations → diagnosis → treatment/operative options → complications, with relevant anatomy.',
+'Ophthalmology':'Build from anatomy/physiology when needed, then definition, classification, etiopathogenesis, symptoms/signs, examination, investigations, diagnosis, management and complications; distinguish similar ocular conditions.',
+'ENT':'Organize by site and clinical presentation; cover anatomy, etiology/pathogenesis, symptoms, signs, examination, investigations, diagnosis, treatment and complications.',
+'Pediatrics':'Consider age-specific presentation, growth/development, pediatric examination, investigations, management and complications; include prevention when relevant.',
+'Orthopedics':'Use mechanism/etiology → anatomy/pathology → clinical features/examination → imaging → classification → management → complications.',
+'Dermatology':'Describe morphology, distribution and evolution first, then etiology/pathogenesis, diagnosis, differentials and treatment.',
+'Psychiatry':'Use definition/classification → etiological factors → psychopathology → clinical features → assessment/diagnosis → management → prognosis.',
+'Obstetrics':'Use pregnancy-specific reasoning: definition → risk factors/etiology → pathophysiology → maternal/fetal features → assessment/investigations → management by gestational context → complications.',
+'Gynaecology':'Use definition → etiology/pathogenesis → symptoms/signs → examination → investigations → diagnosis/differentials → medical/surgical management → complications.',
+'Other':'Use the standard undergraduate MBBS structure most appropriate to the topic.'
+};
 const STUDY_PROMPT = `You are LectureFlow, an expert MBBS lecture study assistant.
 
 The student's goal is to study what was taught in class every day using coherent, standard MBBS-level notes. Listen to the ENTIRE lecture before composing the final material.
@@ -119,6 +139,7 @@ CORE NOTE PHILOSOPHY:
 TEXTBOOK ALIGNMENT:
 - The primary standard MBBS reference for this subject is: SUBJECT_TEXTBOOK.
 - Use that textbook framework to organize terminology, classifications and the expected undergraduate depth.
+- Follow the subject-specific study framework supplied with the request; do not use the same generic template for every subject.
 - If reliable textbook-level knowledge is available, add essential missing background needed to make the lecture understandable, but clearly mark it as “Textbook clarification” when it was not taught.
 - Never claim that a specific textbook or page was consulted unless it actually was.
 - Never invent page numbers, quotations, chapter numbers or citations.
@@ -190,7 +211,8 @@ export async function POST(req: Request) {
     `Subject: ${subject}\n` +
     `Lecture title: ${title}\n` +
     `Lecture date: ${lectureDate}\n` +
-    `Standard MBBS reference: ${SUBJECT_TEXTBOOKS[subject] || 'standard undergraduate MBBS reference'}\n\n` +
+    `Standard MBBS reference: ${SUBJECT_TEXTBOOKS[subject] || 'standard undergraduate MBBS reference'}\n` +
+    `Subject-specific study framework: ${SUBJECT_STUDY_STYLE[subject] || SUBJECT_STUDY_STYLE.Other}\n\n` +
     STUDY_PROMPT.replace('SUBJECT_TEXTBOOK', SUBJECT_TEXTBOOKS[subject] || 'standard undergraduate MBBS reference');
 
   const endpoint =

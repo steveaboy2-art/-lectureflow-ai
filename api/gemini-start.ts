@@ -6,6 +6,17 @@ const NOTES_SCHEMA = {
     transcript: { type: 'string' },
     summary: { type: 'string' },
     revisionNotes: { type: 'string' },
+    lectureOnlyNotes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          h: { type: 'string' },
+          p: { type: 'string' }
+        },
+        required: ['h', 'p']
+      }
+    },
     fullNotes: {
       type: 'array',
       items: {
@@ -71,6 +82,7 @@ const NOTES_SCHEMA = {
     'transcript',
     'summary',
     'revisionNotes',
+    'lectureOnlyNotes',
     'fullNotes',
     'professor',
     'mustKnow',
@@ -159,15 +171,16 @@ OUTPUT:
 1. transcript: cleaned, readable transcript preserving the lecture's substance.
 2. summary: concise overview of everything covered.
 3. revisionNotes: a 5-10 minute high-yield revision sheet.
-4. fullNotes: detailed, coherent MBBS study notes. Make this the longest and most readable section. Use meaningful headings and connected paragraphs; avoid unnecessary bulleting. Include essential textbook clarification only when useful, labelled clearly.
-5. professor: points explicitly stressed, repeated, called important, or framed as likely exam/viva points.
-6. mustKnow: highest-yield facts from this lecture.
-7. questions: exactly 10 short-answer active-recall questions with answers.
-8. viva: exactly 5 viva-style questions with concise model answers.
-9. mcqs: exactly 5 single-best-answer MCQs, each with 4 options, the correct answer, and a short explanation.
-10. confusingAreas: concepts from THIS lecture that are easy to confuse, clarified briefly.
-11. topicsToReadMore: items suitable for later textbook reading.
-12. textbookReference: the standard reference used for the subject, exactly as supplied above.`;
+4. lectureOnlyNotes: a separate, strictly lecture-derived section. This is NOT the textbook-enhanced notes. Include only facts, explanations, examples, classifications, clinical points and emphasis that were actually stated or clearly taught in the recording. Clean up speech and remove filler, but do not add outside knowledge, textbook facts, inferred details or corrections. Preserve the lecturer’s sequence as much as practical. If the lecture is unclear, write [Unclear in recording] rather than guessing. Use a small number of meaningful headings and connected paragraphs. This section is the source-of-truth for “what was said/taught in the lecture.”
+5. fullNotes: detailed, coherent MBBS study notes. Make this the longest and most readable section. Use meaningful headings and connected paragraphs; avoid unnecessary bulleting. Include essential textbook clarification only when useful, labelled clearly.
+6. professor: points explicitly stressed, repeated, called important, or framed as likely exam/viva points.
+7. mustKnow: highest-yield facts from this lecture.
+8. questions: exactly 10 short-answer active-recall questions with answers.
+9. viva: exactly 5 viva-style questions with concise model answers.
+10. mcqs: exactly 5 single-best-answer MCQs, each with 4 options, the correct answer, and a short explanation.
+11. confusingAreas: concepts from THIS lecture that are easy to confuse, clarified briefly.
+12. topicsToReadMore: items suitable for later textbook reading.
+13. textbookReference: the standard reference used for the subject, exactly as supplied above.`;
 
 export async function POST(req: Request) {
   if (req.method !== 'POST') {

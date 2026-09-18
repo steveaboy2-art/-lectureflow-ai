@@ -334,16 +334,27 @@ async function uploadDirectToGemini(file,uploadUrl){
     const chunk=file.slice(offset,end);
     const finalChunk=end===file.size;
 
-    const response=await fetch('/api/gemini-upload-init',{
-      method:'POST',
-      headers:{
-        'Content-Type':'application/octet-stream',
-        'x-lectureflow-upload-url':uploadUrl,
-        'x-lectureflow-upload-offset':String(offset),
-        'x-lectureflow-upload-final':finalChunk?'1':'0'
-      },
-      body:chunk
-    });
+    let response=null;
+    let lastNetworkError=null;
+    for(let attempt=0;attempt<4;attempt++){
+      try{
+        response=await fetch('/api/gemini-upload-init',{
+          method:'POST',
+          headers:{
+            'Content-Type':'application/octet-stream',
+            'x-lectureflow-upload-url':uploadUrl,
+            'x-lectureflow-upload-offset':String(offset),
+            'x-lectureflow-upload-final':finalChunk?'1':'0'
+          },
+          body:chunk
+        });
+        break;
+      }catch(err){
+        lastNetworkError=err;
+        await sleep(400*(attempt+1));
+      }
+    }
+    if(!response)throw new Error('Network error while uploading audio: '+(lastNetworkError?.message||'request failed'));
 
     const text=await response.text();
     let data={};

@@ -93,9 +93,31 @@ const NOTES_SCHEMA = {
   ]
 };
 
+const TEXTBOOK_GUIDANCE: Record<string, string> = {
+  'Anatomy': 'B.D. Chaurasia’s Human Anatomy',
+  'Physiology': 'Guyton and Hall Textbook of Medical Physiology',
+  'Biochemistry': 'D.M. Vasudevan Textbook of Biochemistry for Medical Students; Lippincott Illustrated Reviews: Biochemistry',
+  'Pathology': 'Ramadas Nayak’s Textbook of Pathology; Robbins & Cotran Pathologic Basis of Disease',
+  'Pharmacology': 'K.D. Tripathi Essentials of Medical Pharmacology',
+  'Microbiology': 'Apurba Sastry Essentials of Medical Microbiology',
+  'Forensic Medicine & Toxicology': 'Reddy’s The Essentials of Forensic Medicine and Toxicology',
+  'General Medicine': 'Davidson’s Principles and Practice of Medicine',
+  'General Surgery': 'Bailey & Love’s Short Practice of Surgery; S. Das A Manual on Clinical Surgery',
+  'Ophthalmology': 'A.K. Khurana Comprehensive Ophthalmology',
+  'ENT': 'Dhingra Diseases of Ear, Nose and Throat',
+  'Pediatrics': 'Ghai Essential Pediatrics',
+  'Orthopedics': 'Maheshwari & Mhaskar Essential Orthopaedics',
+  'Dermatology': 'IADVL Textbook of Dermatology',
+  'Psychiatry': 'standard undergraduate psychiatry reference',
+  'Obstetrics': 'Dutta’s Textbook of Obstetrics',
+  'Gynaecology': 'Dutta’s Textbook of Gynaecology'
+};
+
 const STUDY_PROMPT = `You are LectureFlow, an expert MBBS lecture study assistant.
 
-Listen to the entire medical college lecture recording and transform ONLY what is actually taught into accurate, detailed study material. The student's goal is to study the same day's lectures and stay fully caught up.
+Listen to the entire medical college lecture recording and transform it into accurate, detailed MBBS study material. The student's goal is to study the same day's lectures and stay fully caught up.
+
+The standard MBBS textbook framework for this subject is: ${TEXTBOOK_GUIDANCE['__SUBJECT__'] || 'the standard undergraduate curriculum'}. Use this framework to decide what essential textbook context belongs in Main Notes, but never pretend a textbook fact was spoken by the lecturer.
 
 IMPORTANT RULES:
 - Do not produce a shallow summary. Preserve all medically relevant content and teaching points.
@@ -107,21 +129,25 @@ IMPORTANT RULES:
 - Expand abbreviations only when the meaning is clear from context.
 - Keep medical terminology accurate, but make explanations readable for an MBBS student.
 - If the lecturer corrects themselves, use the corrected statement.
-- Do not add textbook material that was not taught except for a very brief clarification needed to make the lecturer's point understandable; label that clarification as such.
+- Main Notes may add essential MBBS textbook context that connects or explains the lecture, but it must be clearly integrated as textbook/contextual clarification rather than falsely attributed to the lecturer.
+- Do not fabricate page numbers, quotations, citations, editions, or claims that you personally consulted a textbook.
+- Keep the lecture as the organizing spine of Main Notes; do not turn Main Notes into a generic textbook chapter.
+- Prefer coherent explanatory paragraphs for mechanisms, pathogenesis, clinical reasoning and relationships. Use bullets/tables only when they improve recall or comparison.
+- Preserve important definitions, classifications, mechanisms/pathogenesis, clinical features, investigations, treatment, complications, differentials and examples when they are taught or are essential to understand the lecture.
 
 OUTPUT:
 1. transcript: a cleaned, readable transcript preserving the lecture's substance.
 2. summary: a concise overview of everything covered.
 3. revisionNotes: a 5-10 minute high-yield revision sheet.
-4. fullNotes: detailed lecture-order notes with clear headings. Include definitions, classifications, mechanisms/pathogenesis, clinical features, investigations, treatment, complications and clinical examples whenever the lecturer discusses them.
+4. fullNotes: detailed, coherent lecture-order MBBS notes with meaningful headings only when the topic genuinely changes. The lecture is the foundation; add only essential textbook/contextual links needed for a complete undergraduate understanding. Explain mechanisms/pathogenesis and clinical reasoning properly when relevant. Do not make the notes artificially fragmented.
 5. lectureOnlyNotes: a strict, source-faithful record of ONLY what the lecturer actually said or clearly taught. Do not add textbook facts, outside knowledge, inferred details, corrections, or missing links. Preserve the lecturer's sequence. Clean filler and repetition, but keep all medically relevant teaching. If a statement is genuinely unclear, write [Unclear in recording]. This section is the source of truth for what was taught in the lecture.
-6. professor: points explicitly stressed, repeated, called important, or framed as likely exam/viva points.
+6. professor: ONLY points the lecturer explicitly stressed, repeated, highlighted, warned about, or framed as important/exam/viva material. Do not infer emphasis merely because a fact is medically important.
 7. mustKnow: the highest-yield facts from this lecture.
 8. questions: exactly 10 short-answer active-recall questions with answers.
 9. viva: exactly 5 viva-style questions with concise model answers.
 10. mcqs: exactly 5 single-best-answer MCQs, each with 4 options, the correct answer, and a short explanation.
-11. confusingAreas: concepts from THIS lecture that are easy to confuse, clarified briefly.
-12. topicsToReadMore: items the lecturer mentioned but did not fully explain, suitable for later textbook reading.`;
+11. confusingAreas: concepts from THIS lecture that are easy to confuse, with concise clarification. Keep the distinction faithful to the lecture and standard MBBS context.
+12. topicsToReadMore: specific topics that were mentioned, assumed, or clearly left incomplete and would benefit from later textbook reading. Do not invent a long reading list.`;
 
 export async function POST(req: Request) {
   if (req.method !== 'POST') {
@@ -164,8 +190,9 @@ export async function POST(req: Request) {
   const prompt =
     `Subject: ${subject}\n` +
     `Lecture title: ${title}\n` +
-    `Lecture date: ${lectureDate}\n\n` +
-    STUDY_PROMPT;
+    `Lecture date: ${lectureDate}\n` +
+    `Primary MBBS textbook framework: ${TEXTBOOK_GUIDANCE[subject] || 'standard undergraduate MBBS curriculum'}\n\n` +
+    STUDY_PROMPT.replace('\\${TEXTBOOK_GUIDANCE[\'__SUBJECT__\'] || \'the standard undergraduate curriculum\'}', TEXTBOOK_GUIDANCE[subject] || 'the standard undergraduate curriculum');
 
   const endpoint =
     'https://generativelanguage.googleapis.com/v1beta/interactions';

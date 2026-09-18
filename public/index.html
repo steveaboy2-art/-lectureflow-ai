@@ -15,12 +15,8 @@
     <aside class="sidebar" aria-label="Primary navigation">
       <div class="brand-wrap">
         <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
-        <div>
-          <div class="brand">LectureFlow</div>
-          <div class="brand-sub">MBBS</div>
-        </div>
+        <div><div class="brand">LectureFlow</div><div class="brand-sub">MBBS</div></div>
       </div>
-
       <nav class="nav-list" id="desktopNav">
         <button class="nav-item active" data-view="today"><span class="nav-icon">⌂</span><span>Today</span></button>
         <button class="nav-item" data-view="upload"><span class="nav-icon">＋</span><span>Upload</span></button>
@@ -29,24 +25,13 @@
         <button class="nav-item" data-view="dashboard"><span class="nav-icon">▥</span><span>Dashboard</span></button>
         <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span><span>Settings</span></button>
       </nav>
-
-      <div class="sidebar-footer">
-        <div class="streak-mini"><span class="streak-dot"></span><div><strong id="sideStreak">4 day streak</strong><small>Stay caught up</small></div></div>
-      </div>
+      <div class="sidebar-footer"><div class="streak-mini"><span class="streak-dot"></span><div><strong id="sideStreak">4 day streak</strong><small>Stay caught up</small></div></div></div>
     </aside>
-
     <main class="main">
       <header class="topbar">
-        <div>
-          <div class="eyebrow" id="pageEyebrow">THURSDAY · 10 SEPTEMBER</div>
-          <h1 id="pageTitle">Today’s classes</h1>
-        </div>
-        <div class="top-actions">
-          <button class="icon-btn" id="searchBtn" title="Search">⌕</button>
-          <div class="avatar">SA</div>
-        </div>
+        <div><div class="eyebrow" id="pageEyebrow">THURSDAY · 10 SEPTEMBER</div><h1 id="pageTitle">Today’s classes</h1></div>
+        <div class="top-actions"><button class="icon-btn" id="searchBtn" title="Search">⌕</button><div class="avatar">SA</div></div>
       </header>
-
       <section id="view-today" class="view active"></section>
       <section id="view-upload" class="view"></section>
       <section id="view-library" class="view"></section>
@@ -54,7 +39,6 @@
       <section id="view-dashboard" class="view"></section>
       <section id="view-settings" class="view"></section>
     </main>
-
     <nav class="bottom-nav" id="mobileNav" aria-label="Mobile navigation">
       <button class="bottom-item active" data-view="today"><span>⌂</span><small>Today</small></button>
       <button class="bottom-item" data-view="library"><span>▤</span><small>Library</small></button>
@@ -63,21 +47,14 @@
       <button class="bottom-item" data-view="dashboard"><span>▥</span><small>Stats</small></button>
     </nav>
   </div>
-
-  <dialog id="lectureDialog" class="sheet-dialog">
-    <div id="lectureDialogContent"></div>
-  </dialog>
-
+  <dialog id="lectureDialog" class="sheet-dialog"><div id="lectureDialogContent"></div></dialog>
   <dialog id="searchDialog" class="search-dialog">
-    <form method="dialog" class="search-head">
-      <input id="globalSearch" type="search" placeholder="Search everything you learned…" autofocus />
-      <button class="text-btn">Done</button>
-    </form>
+    <form method="dialog" class="search-head"><input id="globalSearch" type="search" placeholder="Search everything you learned…" autofocus /><button class="text-btn">Done</button></form>
     <div class="search-results" id="searchResults"></div>
   </dialog>
-
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="vendor/lame.min.js"></script>
   <script src="app.js"></script>
+  <script src="google-drive.js"></script>
 </body>
 </html>

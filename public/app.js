@@ -447,6 +447,7 @@ function normalizeGeneratedLecture(result,meta){
     professor:arr(result?.professor), mustKnow:arr(result?.mustKnow), fullNotes:arr(result?.fullNotes),
     questions:arr(result?.questions), viva:arr(result?.viva), mcqs:arr(result?.mcqs),
     confusingAreas:arr(result?.confusingAreas), topicsToReadMore:arr(result?.topicsToReadMore),
+    lectureOnlyNotes:arr(result?.lectureOnlyNotes),
     transcript:String(result?.transcript||'')
   };
 }
@@ -529,8 +530,11 @@ function wireOpen(){document.querySelectorAll('[data-open]').forEach(x=>x.addEve
 function openLecture(id, initialTab='full'){
   const l=state.lectures.find(x=>x.id===id); if(!l)return; const dlg=el('lectureDialog');
   const qCount=(l.questions||[]).length+(l.viva||[]).length;
-  el('lectureDialogContent').innerHTML=`<div class="dialog-head"><div><div class="subject-chip" style="display:inline-block">${escapeHtml(l.subject)}</div><h2>${escapeHtml(l.title)}</h2><div style="font-size:11px;color:var(--muted)">${fmtDate(l.date)}${l.duration?` · ${l.duration} min`:''}</div></div><button class="close-btn" id="closeLecture">×</button></div><div class="tabs">${[['full','Full Notes'],['revision','Revision'],['professor','Professor Emphasized'],['recall',`Recall (${qCount})`],['mcq',`MCQs (${(l.mcqs||[]).length})`],['transcript','Transcript']].map(([k,n])=>`<button class="tab-btn ${k===initialTab?'active':''}" data-tab="${k}">${n}</button>`).join('')}</div><div class="tab-content" id="lectureTabContent"></div>`;
-  el('closeLecture').addEventListener('click',()=>dlg.close());document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('[data-tab]').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderLectureTab(l,b.dataset.tab)}));renderLectureTab(l,initialTab);dlg.showModal();
+  const lectureTab=(Array.isArray(l.lectureOnlyNotes)&&l.lectureOnlyNotes.length)?'lecture':'full';
+  const tabs=[['full','Full Notes'],['lecture','What Was Taught'],['revision','Revision'],['professor','Professor Emphasized'],['recall',`Recall (${qCount})`],['mcq',`MCQs (${(l.mcqs||[]).length})`],['transcript','Transcript']];
+  const selectedTab=initialTab==='full'&&lectureTab==='lecture'?lectureTab:initialTab;
+  el('lectureDialogContent').innerHTML=`<div class="dialog-head"><div><div class="subject-chip" style="display:inline-block">${escapeHtml(l.subject)}</div><h2>${escapeHtml(l.title)}</h2><div style="font-size:11px;color:var(--muted)">${fmtDate(l.date)}${l.duration?` · ${l.duration} min`:''}</div></div><button class="close-btn" id="closeLecture">×</button></div><div class="tabs">${tabs.map(([k,n])=>`<button class="tab-btn ${k===selectedTab?'active':''}" data-tab="${k}">${n}</button>`).join('')}</div><div class="tab-content" id="lectureTabContent"></div>`;
+  el('closeLecture').addEventListener('click',()=>dlg.close());document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('[data-tab]').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderLectureTab(l,b.dataset.tab)}));renderLectureTab(l,selectedTab);dlg.showModal();
 }
 function renderLectureTab(l,tab){
   const c=el('lectureTabContent'), fullNotes=l.fullNotes||[], mustKnow=l.mustKnow||[], professor=l.professor||[], questions=l.questions||[], viva=l.viva||[], mcqs=l.mcqs||[], confusing=l.confusingAreas||[], readMore=l.topicsToReadMore||[];

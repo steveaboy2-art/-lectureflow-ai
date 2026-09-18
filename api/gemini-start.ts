@@ -64,7 +64,8 @@ const NOTES_SCHEMA = {
     topicsToReadMore: {
       type: 'array',
       items: { type: 'string' }
-    }
+    },
+    textbookReference: { type: 'string' }
   },
   required: [
     'transcript',
@@ -77,38 +78,75 @@ const NOTES_SCHEMA = {
     'viva',
     'mcqs',
     'confusingAreas',
-    'topicsToReadMore'
+    'topicsToReadMore',
+    'textbookReference'
   ]
+};
+
+const SUBJECT_TEXTBOOKS = {
+  'Anatomy':'B.D. Chaurasia’s Human Anatomy',
+  'Physiology':'Guyton and Hall Textbook of Medical Physiology',
+  'Biochemistry':'D.M. Vasudevan Textbook of Biochemistry for Medical Students; Lippincott Illustrated Reviews: Biochemistry',
+  'Pathology':'Ramadas Nayak’s Textbook of Pathology; Robbins & Cotran Pathologic Basis of Disease',
+  'Pharmacology':'K.D. Tripathi Essentials of Medical Pharmacology',
+  'Microbiology':'Apurba Sastry Essentials of Medical Microbiology',
+  'Forensic Medicine & Toxicology':'Reddy’s The Essentials of Forensic Medicine and Toxicology',
+  'General Medicine':'Davidson’s Principles and Practice of Medicine',
+  'General Surgery':'Bailey & Love’s Short Practice of Surgery; S. Das A Manual on Clinical Surgery',
+  'Ophthalmology':'A.K. Khurana Comprehensive Ophthalmology',
+  'ENT':'Dhingra Diseases of Ear, Nose and Throat',
+  'Pediatrics':'Ghai Essential Pediatrics',
+  'Orthopedics':'Maheshwari & Mhaskar Essential Orthopaedics',
+  'Dermatology':'IADVL Textbook of Dermatology',
+  'Psychiatry':'standard undergraduate psychiatry reference',
+  'Obstetrics':'Dutta’s Textbook of Obstetrics',
+  'Gynaecology':'Dutta’s Textbook of Gynaecology'
 };
 
 const STUDY_PROMPT = `You are LectureFlow, an expert MBBS lecture study assistant.
 
-Listen to the entire medical college lecture recording and transform ONLY what is actually taught into accurate, detailed study material. The student's goal is to study the same day's lectures and stay fully caught up.
+The student's goal is to study what was taught in class every day using coherent, standard MBBS-level notes. Listen to the ENTIRE lecture before composing the final material.
 
-IMPORTANT RULES:
-- Do not produce a shallow summary. Preserve all medically relevant content and teaching points.
-- Follow the lecturer's logical order in the detailed notes.
-- Remove filler words, classroom chatter, administrative talk, and irrelevant repetition.
+CORE NOTE PHILOSOPHY:
+- The MAIN NOTES must read like a well-written, continuous MBBS study note, not a collection of disconnected bullet points.
+- Preserve the lecturer's teaching sequence and emphasis, but reorganize only when needed to make the explanation flow naturally.
+- Use substantial explanatory paragraphs for concepts, mechanisms and clinical reasoning. Use bullets/tables only when they genuinely improve readability (classifications, lists, differentials, criteria, drug groups, etc.).
+- Avoid excessive interruptions, tiny fragments, and repetitive headings. Prefer a small number of meaningful headings with connected paragraphs underneath.
+- The main notes should be detailed enough for serious MBBS study, while remaining focused on the lecture.
+- Integrate definitions, anatomy, physiology, pathogenesis/mechanisms, clinical features, investigations, diagnosis, management, complications and clinical correlations whenever relevant to the topic and taught or needed for a coherent explanation.
+- Do not turn the main notes into a transcript.
+
+TEXTBOOK ALIGNMENT:
+- The primary standard MBBS reference for this subject is: SUBJECT_TEXTBOOK.
+- Use that textbook framework to organize terminology, classifications and the expected undergraduate depth.
+- If reliable textbook-level knowledge is available, add essential missing background needed to make the lecture understandable, but clearly mark it as “Textbook clarification” when it was not taught.
+- Never claim that a specific textbook or page was consulted unless it actually was.
+- Never invent page numbers, quotations, chapter numbers or citations.
+- Do not let textbook material overwhelm or replace the lecturer's content.
+- If the lecture conflicts with standard textbook knowledge, preserve what the lecturer taught in the lecture notes but flag the discrepancy as “Check with standard textbook” rather than silently presenting the conflict as settled fact.
+- Keep the content appropriate to the Indian undergraduate MBBS curriculum.
+
+LECTURE FIDELITY:
+- Remove filler words, classroom chatter, administrative talk and irrelevant repetition.
 - Repetition that signals emphasis should be captured under Professor Emphasized.
 - Never invent a fact and pretend the lecturer said it.
-- If the audio is genuinely unclear, write [Unclear in recording].
-- Expand abbreviations only when the meaning is clear from context.
-- Keep medical terminology accurate, but make explanations readable for an MBBS student.
+- If audio is genuinely unclear, write [Unclear in recording].
 - If the lecturer corrects themselves, use the corrected statement.
-- Do not add textbook material that was not taught except for a very brief clarification needed to make the lecturer's point understandable; label that clarification as such.
+- Expand abbreviations only when meaning is clear from context.
 
 OUTPUT:
-1. transcript: a cleaned, readable transcript preserving the lecture's substance.
-2. summary: a concise overview of everything covered.
+1. transcript: cleaned, readable transcript preserving the lecture's substance.
+2. summary: concise overview of everything covered.
 3. revisionNotes: a 5-10 minute high-yield revision sheet.
-4. fullNotes: detailed lecture-order notes with clear headings. Include definitions, classifications, mechanisms/pathogenesis, clinical features, investigations, treatment, complications and clinical examples whenever the lecturer discusses them.
+4. fullNotes: detailed, coherent MBBS study notes. Make this the longest and most readable section. Use meaningful headings and connected paragraphs; avoid unnecessary bulleting. Include essential textbook clarification only when useful, labelled clearly.
 5. professor: points explicitly stressed, repeated, called important, or framed as likely exam/viva points.
-6. mustKnow: the highest-yield facts from this lecture.
+6. mustKnow: highest-yield facts from this lecture.
 7. questions: exactly 10 short-answer active-recall questions with answers.
 8. viva: exactly 5 viva-style questions with concise model answers.
 9. mcqs: exactly 5 single-best-answer MCQs, each with 4 options, the correct answer, and a short explanation.
 10. confusingAreas: concepts from THIS lecture that are easy to confuse, clarified briefly.
-11. topicsToReadMore: items the lecturer mentioned but did not fully explain, suitable for later textbook reading.`;
+11. topicsToReadMore: items suitable for later textbook reading.
+12. textbookReference: the standard reference used for the subject, exactly as supplied above.`;
 
 export async function POST(req: Request) {
   if (req.method !== 'POST') {
@@ -151,8 +189,9 @@ export async function POST(req: Request) {
   const prompt =
     `Subject: ${subject}\n` +
     `Lecture title: ${title}\n` +
-    `Lecture date: ${lectureDate}\n\n` +
-    STUDY_PROMPT;
+    `Lecture date: ${lectureDate}\n` +
+    `Standard MBBS reference: ${SUBJECT_TEXTBOOKS[subject] || 'standard undergraduate MBBS reference'}\n\n` +
+    STUDY_PROMPT.replace('SUBJECT_TEXTBOOK', SUBJECT_TEXTBOOKS[subject] || 'standard undergraduate MBBS reference');
 
   const endpoint =
     'https://generativelanguage.googleapis.com/v1beta/interactions';

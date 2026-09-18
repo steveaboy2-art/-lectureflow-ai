@@ -447,6 +447,7 @@ function normalizeGeneratedLecture(result,meta){
     professor:arr(result?.professor), mustKnow:arr(result?.mustKnow), fullNotes:arr(result?.fullNotes),
     questions:arr(result?.questions), viva:arr(result?.viva), mcqs:arr(result?.mcqs),
     confusingAreas:arr(result?.confusingAreas), topicsToReadMore:arr(result?.topicsToReadMore),
+    textbookReference:String(result?.textbookReference||''),
     transcript:String(result?.transcript||'')
   };
 }

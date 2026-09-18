@@ -99,6 +99,17 @@ const seedLectures = [
   }
 ];
 
+const DEFAULT_STATE = {
+  lectures: [],
+  streak: 0,
+  processedTotal: 0,
+  settings: {
+    aiProvider: 'Gemini via Vercel Functions',
+    driveFolder: 'MBBS/Lecture Recordings',
+    notesFolder: 'MBBS/Lecture Notes'
+  }
+};
+
 const revisionOffsets = [0,1,7,30];
 let state = loadState();
 let currentView = 'today';
@@ -115,17 +126,6 @@ let recorderState = 'idle';
 let recordingTimerId = null;
 let recordingSeconds = 0;
 let recordedAudioUrl = null;
-
-const DEFAULT_STATE = {
-  lectures: [],
-  streak: 0,
-  processedTotal: 0,
-  settings: {
-    aiProvider: 'Gemini via Vercel Functions',
-    driveFolder: 'MBBS/Lecture Recordings',
-    notesFolder: 'MBBS/Lecture Notes'
-  }
-};
 
 function loadState(){
   const fallback = JSON.parse(JSON.stringify(DEFAULT_STATE));

@@ -117,7 +117,7 @@ const STUDY_PROMPT = `You are LectureFlow, an expert MBBS lecture study assistan
 
 Listen to the entire medical college lecture recording and transform it into accurate, detailed MBBS study material. The student's goal is to study the same day's lectures and stay fully caught up.
 
-The standard MBBS textbook framework for this subject is: ${TEXTBOOK_GUIDANCE['__SUBJECT__'] || 'the standard undergraduate curriculum'}. Use this framework to decide what essential textbook context belongs in Main Notes, but never pretend a textbook fact was spoken by the lecturer.
+Use the supplied Primary MBBS textbook framework to decide what essential textbook context belongs in Main Notes, but never pretend a textbook fact was spoken by the lecturer.
 
 IMPORTANT RULES:
 - Do not produce a shallow summary. Preserve all medically relevant content and teaching points.

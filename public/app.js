@@ -348,10 +348,11 @@ async function getAudioDurationMinutes(file){
   });
 }
 async function uploadDirectToGemini(file,uploadUrl){
-  // Stay well below Vercel's 4.5 MB function request limit.
-  // The server also returns Gemini's authoritative offset so a transient
-  // mismatch can be recovered without restarting a long lecture upload.
-  const chunkSize=3*1024*1024;
+  // Gemini's resumable uploader requires every non-final chunk to be an
+  // exact multiple of its 8 MiB chunk granularity. Vercel Functions have a
+  // 4.5 MB request-body limit, so audio chunks must go directly from the
+  // browser to Gemini instead of being relayed through our API function.
+  const chunkSize=8*1024*1024;
   let offset=0;
   let retries=0;
 
@@ -364,51 +365,65 @@ async function uploadDirectToGemini(file,uploadUrl){
     let lastNetworkError=null;
     for(let attempt=0;attempt<4;attempt++){
       try{
-        response=await fetch('/api/gemini-upload-init',{
+        response=await fetch(uploadUrl,{
           method:'POST',
           headers:{
-            'Content-Type':'application/octet-stream',
-            'x-lectureflow-upload-url':uploadUrl,
-            'x-lectureflow-upload-offset':String(offset),
-            'x-lectureflow-upload-final':finalChunk?'1':'0'
+            'X-Goog-Upload-Offset':String(offset),
+            'X-Goog-Upload-Command':finalChunk?'upload, finalize':'upload'
           },
           body:chunk
         });
         break;
       }catch(err){
         lastNetworkError=err;
-        await sleep(400*(attempt+1));
+        await sleep(500*(attempt+1));
       }
     }
-    if(!response)throw new Error('Network error while uploading audio: '+(lastNetworkError?.message||'request failed'));
+
+    if(!response){
+      throw new Error('Could not reach Gemini directly from this device. Please keep the page open and try the upload again.');
+    }
 
     const text=await response.text();
     let data={};
     try{data=JSON.parse(text);}catch{}
 
     if(!response.ok){
-      const serverOffset=Number(data?.serverOffset);
+      const serverOffset=Number(
+        response.headers.get('x-goog-upload-offset') ||
+        data?.serverOffset
+      );
 
-      // If Gemini and the browser disagree about the current position,
-      // resume from Gemini's position rather than throwing away the upload.
       if(Number.isFinite(serverOffset) && serverOffset>=0 && serverOffset<=file.size && retries<5){
         offset=serverOffset;
         retries++;
-        await sleep(250*retries);
+        await sleep(300*retries);
         continue;
       }
 
-      throw new Error(data?.error||text||'Audio upload failed');
+      throw new Error(
+        data?.error ||
+        text ||
+        `Gemini audio upload failed — HTTP ${response.status}`
+      );
     }
 
     retries=0;
 
-    if(finalChunk)return data;
+    if(finalChunk){
+      try{return JSON.parse(text);}catch{
+        throw new Error('Gemini finished the upload but returned an unreadable response.');
+      }
+    }
 
-    const serverNextOffset=Number(data?.nextOffset);
+    const serverNextOffset=Number(
+      response.headers.get('x-goog-upload-offset')
+    );
+
     if(!Number.isFinite(serverNextOffset) || serverNextOffset<=offset || serverNextOffset>file.size){
       throw new Error('Gemini returned an invalid upload offset.');
     }
+
     offset=serverNextOffset;
   }
 

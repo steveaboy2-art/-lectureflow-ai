@@ -416,15 +416,18 @@ async function uploadDirectToGemini(file,uploadUrl){
       }
     }
 
+    // Gemini's successful upload response does not reliably include
+    // X-Goog-Upload-Offset. Since we sent the entire chunk and the request
+    // succeeded, the next offset is the end of this chunk.
     const serverNextOffset=Number(
       response.headers.get('x-goog-upload-offset')
     );
 
-    if(!Number.isFinite(serverNextOffset) || serverNextOffset<=offset || serverNextOffset>file.size){
-      throw new Error('Gemini returned an invalid upload offset.');
+    if(Number.isFinite(serverNextOffset) && serverNextOffset>offset && serverNextOffset<=file.size){
+      offset=serverNextOffset;
+    }else{
+      offset=end;
     }
-
-    offset=serverNextOffset;
   }
 
   throw new Error('Audio upload did not finish.');

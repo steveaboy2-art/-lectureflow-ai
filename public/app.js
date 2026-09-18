@@ -9,7 +9,33 @@ if ('caches' in window) {
     keys.forEach((key) => caches.delete(key));
   });
 }
-const SUBJECTS = ['Medicine','Surgery','Ophthalmology','ENT','Pediatrics','Orthopedics','OBG','Dermatology','Psychiatry','Other'];
+const SUBJECT_GROUPS = {
+  '1st Year MBBS':['Anatomy','Physiology','Biochemistry'],
+  '2nd Year MBBS':['Pathology','Pharmacology','Microbiology','Forensic Medicine & Toxicology'],
+  'Clinical / Final MBBS':['General Medicine','General Surgery','Ophthalmology','ENT','Pediatrics','Orthopedics','Dermatology','Psychiatry','Obstetrics','Gynaecology'],
+  'Other':['Other']
+};
+const SUBJECTS = Object.values(SUBJECT_GROUPS).flat();
+const TEXTBOOK_REFERENCES = {
+  'Anatomy':['B.D. Chaurasia’s Human Anatomy'],
+  'Physiology':['Guyton and Hall Textbook of Medical Physiology'],
+  'Biochemistry':['D.M. Vasudevan Textbook of Biochemistry for Medical Students','Lippincott Illustrated Reviews: Biochemistry'],
+  'Pathology':['Ramadas Nayak’s Textbook of Pathology','Robbins & Cotran Pathologic Basis of Disease'],
+  'Pharmacology':['K.D. Tripathi Essentials of Medical Pharmacology'],
+  'Microbiology':['Apurba Sastry Essentials of Medical Microbiology'],
+  'Forensic Medicine & Toxicology':['Reddy’s The Essentials of Forensic Medicine and Toxicology'],
+  'General Medicine':['Davidson’s Principles and Practice of Medicine'],
+  'General Surgery':['Bailey & Love’s Short Practice of Surgery','S. Das A Manual on Clinical Surgery'],
+  'Ophthalmology':['A.K. Khurana Comprehensive Ophthalmology'],
+  'ENT':['Dhingra Diseases of Ear, Nose and Throat'],
+  'Pediatrics':['Ghai Essential Pediatrics'],
+  'Orthopedics':['Maheshwari & Mhaskar Essential Orthopaedics'],
+  'Dermatology':['IADVL Textbook of Dermatology'],
+  'Psychiatry':['Shorter Oxford Textbook / standard undergraduate psychiatry reference'],
+  'Obstetrics':['Dutta’s Textbook of Obstetrics'],
+  'Gynaecology':['Dutta’s Textbook of Gynaecology'],
+  'Other':[]
+};
 
 const seedLectures = [
   {
@@ -157,7 +183,7 @@ function renderUpload(){
     <div class="dropzone" id="dropzone"><div class="upload-symbol">♫</div><h3>Drop your lecture recording here</h3><p>MP3, M4A, WAV, AAC, OGG or WebM · tap to browse on iPhone/iPad</p><input id="audioFile" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.webm" /></div>
     <div class="file-selected" id="fileSelected"><div class="file-badge">♪</div><div><strong id="fileName"></strong><small id="fileMeta"></small></div></div>
     <audio id="recordingPreview" class="recording-preview" controls hidden></audio>
-    <div class="form-grid"><div class="field"><label>SUBJECT</label><select id="subjectInput">${SUBJECTS.map(s=>`<option>${s}</option>`).join('')}</select></div><div class="field"><label>DATE</label><input id="dateInput" type="date" value="${date}" /></div><div class="field wide"><label>LECTURE TITLE</label><input id="titleInput" placeholder="e.g. Ocular motility and cover test" /></div></div>
+    <div class="form-grid"><div class="field"><label>SUBJECT</label><select id="subjectInput">${Object.entries(SUBJECT_GROUPS).map(([group,items])=>`<optgroup label="${escapeHtml(group)}">${items.map(s=>`<option>${escapeHtml(s)}</option>`).join('')}</optgroup>`).join('')}</select></div><div class="field"><label>DATE</label><input id="dateInput" type="date" value="${date}" /></div><div class="field wide"><label>LECTURE TITLE</label><input id="titleInput" placeholder="e.g. Ocular motility and cover test" /></div></div>
     <button class="primary-btn" id="processBtn" disabled>Process lecture with Gemini</button><div id="processingArea"></div>
   </div><div class="section"><div class="panel"><h3>What LectureFlow creates</h3><div class="bar-list"><div class="bar-line"><span>Full notes</span><div class="bar-track"><span style="width:100%"></span></div><b>✓</b></div><div class="bar-line"><span>Revision sheet</span><div class="bar-track"><span style="width:100%"></span></div><b>✓</b></div><div class="bar-line"><span>Recall + viva</span><div class="bar-track"><span style="width:100%"></span></div><b>✓</b></div><div class="bar-line"><span>5 MCQs</span><div class="bar-track"><span style="width:100%"></span></div><b>✓</b></div><div class="bar-line"><span>Transcript</span><div class="bar-track"><span style="width:100%"></span></div><b>✓</b></div></div><p class="gateway-note">Powered by Gemini through secure Vercel Functions. Your audio goes to Gemini for processing; LectureFlow stores the generated study notes locally on this device.</p></div></div></div>`;
   const dz=el('dropzone'), inp=el('audioFile');
@@ -508,7 +534,7 @@ function openLecture(id, initialTab='full'){
 }
 function renderLectureTab(l,tab){
   const c=el('lectureTabContent'), fullNotes=l.fullNotes||[], mustKnow=l.mustKnow||[], professor=l.professor||[], questions=l.questions||[], viva=l.viva||[], mcqs=l.mcqs||[], confusing=l.confusingAreas||[], readMore=l.topicsToReadMore||[];
-  if(tab==='full') c.innerHTML=(fullNotes.length?fullNotes.map(n=>`<div class="note-section"><h3>${escapeHtml(n.h)}</h3><p>${escapeHtml(n.p)}</p></div>`).join(''):`<div class="empty">No detailed notes available.</div>`)+`${confusing.length?`<div class="note-section"><h3>Confusing areas clarified</h3><ul>${confusing.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>`:''}${readMore.length?`<div class="note-section"><h3>Topics to read more about</h3><ul>${readMore.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>`:''}${knowledgeButtons(l)}`;
+  if(tab==='full') c.innerHTML=`<div class="note-intro"><strong>Textbook framework:</strong> ${escapeHtml((TEXTBOOK_REFERENCES[l.subject]||[]).join(' · ')||'Standard MBBS curriculum')}</div>`+(fullNotes.length?fullNotes.map(n=>`<div class="note-section"><h3>${escapeHtml(n.h)}</h3><p>${escapeHtml(n.p)}</p></div>`).join(''):`<div class="empty">No detailed notes available.</div>`)+`${confusing.length?`<div class="note-section"><h3>Confusing areas clarified</h3><ul>${confusing.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>`:''}${readMore.length?`<div class="note-section"><h3>Topics to read more about</h3><ul>${readMore.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>`:''}${knowledgeButtons(l)}`;
   if(tab==='revision') c.innerHTML=`<div class="note-section"><h3>5–10 minute revision sheet</h3><p class="revision-text">${escapeHtml(l.revisionNotes||l.summary||'')}</p><h4>Must know</h4><ul>${mustKnow.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>${knowledgeButtons(l)}`;
   if(tab==='professor') c.innerHTML=`<div class="note-section"><h3>Professor emphasized</h3>${professor.length?`<div class="emphasis-box"><ul>${professor.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>`:`<p>No clear emphasis points were detected in the recording.</p>`}</div>${knowledgeButtons(l)}`;
   if(tab==='recall') c.innerHTML=`<div class="note-section"><h3>Active recall</h3><p>${questions.length} short-answer questions generated from this lecture.</p>${questions.length?`<button class="primary-btn" style="max-width:240px" id="startLectureQuiz">Start active recall</button>`:''}</div>${viva.length?`<div class="note-section"><h3>Viva questions</h3><div class="qa-list">${viva.map((x,i)=>`<details><summary>${i+1}. ${escapeHtml(x.q)}</summary><p>${escapeHtml(x.a)}</p></details>`).join('')}</div></div>`:''}`;

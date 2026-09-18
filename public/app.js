@@ -502,6 +502,24 @@ function renderSettings(){
   fetch('/api/gemini-health').then(r=>r.json()).then(d=>{const b=el('geminiInfo');if(!b)return;b.textContent=d.ok?'Live':'Unavailable';b.classList.toggle('connected',!!d.ok);b.classList.toggle('error-pill',!d.ok)}).catch(()=>{const b=el('geminiInfo');if(b){b.textContent='Unavailable';b.classList.add('error-pill')}});
 }
 
+// Google Drive fallback click binding. This stays in the main app bundle so the
+// visible button still responds even if the optional Drive module is delayed.
+document.addEventListener('click',(event)=>{
+  const btn=event.target.closest('#connectDriveBtn');
+  if(!btn || btn.dataset.driveFallbackBound)return;
+  btn.dataset.driveFallbackBound='1';
+  btn.addEventListener('click',()=>{
+    if(typeof window.lectureFlowConnectDrive==='function'){
+      window.lectureFlowConnectDrive();
+    }else{
+      const text=document.getElementById('driveStatusText');
+      if(text)text.textContent='Google Drive module is still loading…';
+      const toast=document.getElementById('toast');
+      if(toast){toast.textContent='Google Drive is still loading — try again in a moment.';toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),2500);}
+    }
+  });
+});
+
 function render(view){({today:renderToday,upload:renderUpload,library:renderLibrary,revision:renderRevision,dashboard:renderDashboard,settings:renderSettings}[view]||renderToday)()}
 function wireCommon(){document.querySelectorAll('[data-goto]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.goto)));wireOpen()}
 function wireOpen(){document.querySelectorAll('[data-open]').forEach(x=>x.addEventListener('click',e=>{if(e.currentTarget.dataset.open)openLecture(e.currentTarget.dataset.open)}))}

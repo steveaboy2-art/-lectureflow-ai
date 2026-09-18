@@ -311,10 +311,12 @@ async function getAudioDurationMinutes(file){
   });
 }
 async function uploadDirectToGemini(file,uploadUrl){
-  // Keep chunks comfortably below Vercel's function request limits and
-  // always follow Gemini's authoritative resumable-upload offset.
-  const chunkSize=1*1024*1024;
+  // Stay well below Vercel's 4.5 MB function request limit.
+  // The server also returns Gemini's authoritative offset so a transient
+  // mismatch can be recovered without restarting a long lecture upload.
+  const chunkSize=4*1024*1024;
   let offset=0;
+  let retries=0;
 
   while(offset<file.size){
     const end=Math.min(offset+chunkSize,file.size);
@@ -334,25 +336,29 @@ async function uploadDirectToGemini(file,uploadUrl){
 
     const text=await response.text();
     let data={};
-
-    try{
-      data=JSON.parse(text);
-    }catch{}
+    try{data=JSON.parse(text);}catch{}
 
     if(!response.ok){
-      throw new Error(
-        data?.error ||
-        text ||
-        'Audio upload failed'
-      );
+      const serverOffset=Number(data?.serverOffset);
+
+      // If Gemini and the browser disagree about the current position,
+      // resume from Gemini's position rather than throwing away the upload.
+      if(Number.isFinite(serverOffset) && serverOffset>=0 && serverOffset<=file.size && retries<5){
+        offset=serverOffset;
+        retries++;
+        await sleep(250*retries);
+        continue;
+      }
+
+      throw new Error(data?.error||text||'Audio upload failed');
     }
 
-    if(finalChunk){
-      return data;
-    }
+    retries=0;
+
+    if(finalChunk)return data;
 
     const serverNextOffset=Number(data?.nextOffset);
-    if(!Number.isFinite(serverNextOffset) || serverNextOffset<=offset){
+    if(!Number.isFinite(serverNextOffset) || serverNextOffset<=offset || serverNextOffset>file.size){
       throw new Error('Gemini returned an invalid upload offset.');
     }
     offset=serverNextOffset;

@@ -55,9 +55,15 @@
   }
 
   async function connectDrive() {
+    const btn=document.getElementById('connectDriveBtn');
+    const statusText=document.getElementById('driveStatusText');
     try {
-      if (!clientId) throw new Error('Google Drive is not configured yet. Add GOOGLE_CLIENT_ID in Vercel first.');
+      if (btn) { btn.textContent='Opening Google…'; btn.disabled=true; }
+      if (statusText) statusText.textContent='Opening Google permission screen…';
+
+      if (!clientId) throw new Error('Google Drive configuration is still loading. Please tap Connect Google Drive again.');
       if (!window.google?.accounts?.oauth2) {
+        if (statusText) statusText.textContent='Google sign-in is still loading…';
         notify('Google sign-in is still loading — tap Connect Google Drive again in a moment.');
         return;
       }
@@ -66,18 +72,35 @@
           client_id: clientId,
           scope: DRIVE_SCOPE,
           callback: (response) => {
-            if (response.error) { notify('Google Drive connection was cancelled.'); return; }
+            if (response.error) {
+              if (statusText) statusText.textContent='Google connection was cancelled.';
+              notify('Google Drive connection was cancelled.');
+              return;
+            }
             accessToken=response.access_token;
             localStorage.setItem('lectureflow-drive-connected','1');
             updateDriveUI();
             notify('Google Drive connected ✓');
           },
-          error_callback: () => notify('Google sign-in popup could not be opened.')
+          error_callback: (err) => {
+            const reason = err?.type === 'popup_failed_to_open' ? 'Safari blocked the Google popup.' :
+              err?.type === 'popup_closed' ? 'Google sign-in window was closed.' :
+              'Google sign-in could not open.';
+            if (statusText) statusText.textContent=reason;
+            notify(reason);
+          }
         });
       }
       tokenClient.requestAccessToken({prompt: accessToken ? '' : 'consent'});
-    } catch (e) { notify(e.message || 'Could not connect Google Drive'); }
+    } catch (e) {
+      if (statusText) statusText.textContent=e.message || 'Could not connect Google Drive';
+      notify(e.message || 'Could not connect Google Drive');
+    } finally {
+      if (btn && !accessToken) { btn.textContent='Connect Google Drive'; btn.disabled=false; }
+    }
   }
+
+  window.lectureFlowConnectDrive = connectDrive;
 
   async function driveFetch(url, options={}) {
     if (!accessToken) throw new Error('Google Drive is not connected.');

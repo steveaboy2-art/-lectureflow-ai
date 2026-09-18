@@ -3,7 +3,7 @@
   const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
   let tokenClient = null;
   let accessToken = null;
-  let clientId = '';
+  // Google OAuth client IDs are public browser identifiers; keeping this local avoids a fragile config fetch on iPad Safari.\n  let clientId = '14663212067-eb2lvc5qorg89vdgeod530ssaoaa2d1f.apps.googleusercontent.com';
   let saving = false;
 
   const esc = (s='') => String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));
@@ -160,15 +160,12 @@
     renderDriveCard();
     if (localStorage.getItem('lectureflow-drive-connected')==='1') updateDriveUI();
 
-    const configPromise = fetch(CLIENT_ID_URL)
-      .then(r => r.json())
-      .then(data => { clientId=data.clientId||''; updateDriveUI(); })
-      .catch(() => { notify('Google Drive configuration could not load.'); });
-
+    // Do not block the Drive button on a config API request. The client ID is already
+    // embedded above and is safe to expose in a browser application.
     const scriptPromise = loadGoogleScript()
       .catch(() => { notify('Google sign-in could not load.'); });
 
-    await Promise.allSettled([configPromise, scriptPromise]);
+    await scriptPromise;
     updateDriveUI();
 
     const originalSetItem=Storage.prototype.setItem;

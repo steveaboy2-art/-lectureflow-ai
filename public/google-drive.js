@@ -57,7 +57,10 @@
   async function connectDrive() {
     try {
       if (!clientId) throw new Error('Google Drive is not configured yet. Add GOOGLE_CLIENT_ID in Vercel first.');
-      await loadGoogleScript();
+      if (!window.google?.accounts?.oauth2) {
+        notify('Google sign-in is still loading — tap Connect Google Drive again in a moment.');
+        return;
+      }
       if (!tokenClient) {
         tokenClient = google.accounts.oauth2.initTokenClient({
           client_id: clientId,
@@ -132,6 +135,7 @@
     try {
       const r=await fetch(CLIENT_ID_URL); const data=await r.json(); clientId=data.clientId||'';
     } catch {}
+    try { await loadGoogleScript(); } catch { notify('Google sign-in could not load.'); }
     renderDriveCard();
     if (localStorage.getItem('lectureflow-drive-connected')==='1') updateDriveUI();
 

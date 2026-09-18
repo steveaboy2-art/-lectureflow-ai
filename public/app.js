@@ -311,7 +311,9 @@ async function getAudioDurationMinutes(file){
   });
 }
 async function uploadDirectToGemini(file,uploadUrl){
-  const chunkSize=2*1024*1024;
+  // Keep chunks comfortably below Vercel's function request limits and
+  // always follow Gemini's authoritative resumable-upload offset.
+  const chunkSize=1*1024*1024;
   let offset=0;
 
   while(offset<file.size){
@@ -349,7 +351,11 @@ async function uploadDirectToGemini(file,uploadUrl){
       return data;
     }
 
-    offset=end;
+    const serverNextOffset=Number(data?.nextOffset);
+    if(!Number.isFinite(serverNextOffset) || serverNextOffset<=offset){
+      throw new Error('Gemini returned an invalid upload offset.');
+    }
+    offset=serverNextOffset;
   }
 
   throw new Error('Audio upload did not finish.');

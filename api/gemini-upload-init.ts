@@ -13,7 +13,7 @@ const ALLOWED_AUDIO_TYPES = new Set([
   'audio/opus'
 ]);
 
-const MAX_CHUNK_SIZE = 2 * 1024 * 1024;
+const MAX_CHUNK_SIZE = 4 * 1024 * 1024;
 
 function cleanName(name: string) {
   return String(name || 'lecture-audio')
@@ -97,10 +97,31 @@ async function relayUploadChunk(
       detail: text.slice(0, 1500)
     });
 
+    // Gemini may tell us the authoritative committed offset when the
+    // client and server get out of sync. Return it so the browser can
+    // resynchronize instead of losing the whole lecture.
+    const headerOffset = Number(
+      upstream.headers.get('x-goog-upload-offset') || ''
+    );
+    const bodyOffsetMatch = text.match(
+      /(?:offset|position)[^0-9]{0,30}(\\d+)/i
+    );
+    const bodyOffset = bodyOffsetMatch
+      ? Number(bodyOffsetMatch[1])
+      : NaN;
+
+    const serverOffset =
+      Number.isFinite(headerOffset)
+        ? headerOffset
+        : Number.isFinite(bodyOffset)
+          ? bodyOffset
+          : null;
+
     return Response.json(
       {
         error:
-          `Gemini audio upload failed — HTTP ${upstream.status}: ${text.slice(0, 1000)}`
+          `Gemini audio upload failed — HTTP ${upstream.status}: ${text.slice(0, 1000)}`,
+        serverOffset
       },
       { status: 502 }
     );

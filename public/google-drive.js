@@ -132,12 +132,21 @@
   }
 
   async function init() {
-    try {
-      const r=await fetch(CLIENT_ID_URL); const data=await r.json(); clientId=data.clientId||'';
-    } catch {}
-    try { await loadGoogleScript(); } catch { notify('Google sign-in could not load.'); }
+    // Render and bind the button immediately. On iPad Safari, waiting for an
+    // external script before binding can leave the visible button inert.
     renderDriveCard();
     if (localStorage.getItem('lectureflow-drive-connected')==='1') updateDriveUI();
+
+    const configPromise = fetch(CLIENT_ID_URL)
+      .then(r => r.json())
+      .then(data => { clientId=data.clientId||''; updateDriveUI(); })
+      .catch(() => { notify('Google Drive configuration could not load.'); });
+
+    const scriptPromise = loadGoogleScript()
+      .catch(() => { notify('Google sign-in could not load.'); });
+
+    await Promise.allSettled([configPromise, scriptPromise]);
+    updateDriveUI();
 
     const originalSetItem=Storage.prototype.setItem;
     Storage.prototype.setItem=function(key,value){

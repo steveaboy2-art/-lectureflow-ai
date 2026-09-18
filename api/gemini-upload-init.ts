@@ -13,7 +13,7 @@ const ALLOWED_AUDIO_TYPES = new Set([
   'audio/opus'
 ]);
 
-const MAX_CHUNK_SIZE = 4 * 1024 * 1024;
+const MAX_CHUNK_SIZE = 3 * 1024 * 1024;
 
 function cleanName(name: string) {
   return String(name || 'lecture-audio')
@@ -104,7 +104,7 @@ async function relayUploadChunk(
       upstream.headers.get('x-goog-upload-offset') || ''
     );
     const bodyOffsetMatch = text.match(
-      /(?:offset|position)[^0-9]{0,30}(\\d+)/i
+      /(?:offset|position)[^0-9]{0,30}(\d+)/i
     );
     const bodyOffset = bodyOffsetMatch
       ? Number(bodyOffsetMatch[1])

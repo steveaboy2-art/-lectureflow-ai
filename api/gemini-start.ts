@@ -6,6 +6,17 @@ const NOTES_SCHEMA = {
     transcript: { type: 'string' },
     summary: { type: 'string' },
     revisionNotes: { type: 'string' },
+    lectureNotes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          h: { type: 'string' },
+          p: { type: 'string' }
+        },
+        required: ['h', 'p']
+      }
+    },
     fullNotes: {
       type: 'array',
       items: {
@@ -70,6 +81,7 @@ const NOTES_SCHEMA = {
     'transcript',
     'summary',
     'revisionNotes',
+    'lectureNotes',
     'fullNotes',
     'professor',
     'mustKnow',
@@ -115,6 +127,16 @@ TEXTBOOK / MBBS FRAMEWORK:
 - If a tiny clarification is essential to understand something the lecturer taught, include it only when highly reliable and phrase it as a clarification, not as something the professor said.
 - Put material that the lecturer mentioned but did not teach in depth into topicsToReadMore.
 - The final notes should feel like high-quality class notes that are structured for MBBS exams, not like a generic internet article.
+
+LECTURE NOTES:
+- This is a separate, first-class section containing ONLY what was actually taught in the lecture.
+- Do not add textbook facts, background knowledge, or inferred details that were not taught.
+- Preserve the professor's explanations, examples, clinical reasoning, terminology, sequence of concepts, and meaningful emphasis.
+- Reorganize for readability, but do not expand beyond the lecture.
+- Remove greetings, filler, classroom management, unrelated discussion, and meaningless repetition.
+- If a statement is unclear in the audio, write [Unclear in recording] rather than guessing.
+- Make these notes detailed enough that a student can review exactly what happened in class without replaying the recording.
+- This section must never present textbook supplementation as if the professor taught it.
 
 FULL NOTES:
 - Build a coherent set of detailed study notes from the entire lecture.
@@ -171,13 +193,14 @@ OUTPUT:
 1. transcript: cleaned readable transcript preserving the lecture's substance.
 2. summary: coherent overview of the lecture.
 3. revisionNotes: high-yield 5–10 minute revision sheet.
-4. fullNotes: polished, detailed MBBS study notes.
-5. professor: explicitly emphasized or exam/viva-signposted points.
-6. mustKnow: highest-yield facts from this lecture.
-7. questions: exactly 10 active-recall questions with answers.
-8. viva: exactly 5 viva questions with concise model answers.
-9. mcqs: exactly 5 four-option single-best-answer MCQs with explanations.
-10. confusingAreas: likely confusions and brief clarifications.
+4. lectureNotes: faithful, detailed notes containing only what was taught in the lecture.
+5. fullNotes: polished, detailed MBBS study notes using the textbook/MBBS framework while keeping lecture content and supplementation distinct.
+6. professor: explicitly emphasized or exam/viva-signposted points.
+7. mustKnow: highest-yield facts from this lecture.
+8. questions: exactly 10 active-recall questions with answers.
+9. viva: exactly 5 viva questions with concise model answers.
+10. mcqs: exactly 5 four-option single-best-answer MCQs with explanations.
+11. confusingAreas: likely confusions and brief clarifications.
 11. topicsToReadMore: genuinely incomplete or deferred topics from the lecture.`;
 
 export async function POST(req: Request) {

@@ -12,7 +12,7 @@ if ('caches' in window) {
 const SUBJECT_GROUPS = {
   '1st Year MBBS':['Anatomy','Physiology','Biochemistry'],
   '2nd Year MBBS':['Pathology','Pharmacology','Microbiology','Forensic Medicine & Toxicology'],
-  'Clinical / Final MBBS':['General Medicine','General Surgery','Ophthalmology','ENT','Pediatrics','Orthopedics','Dermatology','Psychiatry','Obstetrics','Gynaecology'],
+  'Clinical / Final MBBS':['General Medicine','General Surgery','Ophthalmology','ENT','Pediatrics','Orthopedics','Dermatology','Psychiatry','Obstetrics','Gynaecology','Community Medicine / PSM'],
   'Other':['Other']
 };
 const SUBJECTS = Object.values(SUBJECT_GROUPS).flat();
@@ -34,6 +34,7 @@ const TEXTBOOK_REFERENCES = {
   'Psychiatry':['Shorter Oxford Textbook / standard undergraduate psychiatry reference'],
   'Obstetrics':['Dutta’s Textbook of Obstetrics'],
   'Gynaecology':['Dutta’s Textbook of Gynaecology'],
+  'Community Medicine / PSM':['Park’s Textbook of Preventive and Social Medicine'],
   'Other':[]
 };
 

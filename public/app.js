@@ -569,13 +569,16 @@ function wireOpen(){document.querySelectorAll('[data-open]').forEach(x=>x.addEve
 function openLecture(id, initialTab='full'){
   const l=state.lectures.find(x=>x.id===id); if(!l)return; const dlg=el('lectureDialog');
   const qCount=(l.questions||[]).length+(l.viva||[]).length;
-  el('lectureDialogContent').innerHTML=`<div class="dialog-head"><div><div class="subject-chip" style="display:inline-block">${escapeHtml(l.subject)}</div><h2>${escapeHtml(l.title)}</h2><div style="font-size:11px;color:var(--muted)">${fmtDate(l.date)}${l.duration?` · ${l.duration} min`:''}</div></div><button class="close-btn" id="closeLecture">×</button></div><div class="tabs">${[['full','Full Notes'],['lecture','Lecture Notes'],['revision','Revision'],['professor','Professor Emphasized'],['recall',`Recall (${qCount})`],['mcq',`MCQs (${(l.mcqs||[]).length})`],['transcript','Transcript']].map(([k,n])=>`<button class="tab-btn ${k===initialTab?'active':''}" data-tab="${k}">${n}</button>`).join('')}</div><div class="download-row"><button class="outline-btn" data-download-pdf="full">↓ Full Notes PDF</button><button class="outline-btn" data-download-pdf="revision">↓ Revision PDF</button><button class="outline-btn" data-download-pdf="transcript">↓ Transcript PDF</button><button class="outline-btn" data-download-txt="transcript">↓ Transcript TXT</button></div><div class="tab-content" id="lectureTabContent"></div>`;
+  el('lectureDialogContent').innerHTML=`<div class="dialog-head"><div><div class="subject-chip" style="display:inline-block">${escapeHtml(l.subject)}</div><h2>${escapeHtml(l.title)}</h2><div style="font-size:11px;color:var(--muted)">${fmtDate(l.date)}${l.duration?` · ${l.duration} min`:''}</div></div><button class="close-btn" id="closeLecture">×</button></div><div class="tabs">${[['full','Full Notes'],['lecture','Lecture Notes'],['revision','Revision'],['professor','Professor Emphasized'],['recall',`Recall (${qCount})`],['mcq',`MCQs (${(l.mcqs||[]).length})`],['transcript','Transcript']].map(([k,n])=>`<button class="tab-btn ${k===initialTab?'active':''}" data-tab="${k}">${n}</button>`).join('')}</div><div class="download-row"><button class="outline-btn" data-download-pdf="full">↓ Full Notes PDF</button><button class="outline-btn" data-download-pdf="lecture">↓ Lecture Notes PDF</button><button class="outline-btn" data-save-drive="lecture">☁ Save Lecture Notes to Drive</button><button class="outline-btn" data-save-drive="full">☁ Save Full Notes to Drive</button><button class="outline-btn" data-download-pdf="revision">↓ Revision PDF</button><button class="outline-btn" data-save-drive="revision">☁ Save Revision to Drive</button><button class="outline-btn" data-download-pdf="transcript">↓ Transcript PDF</button><button class="outline-btn" data-save-drive="transcript">☁ Save Transcript to Drive</button><button class="outline-btn" data-download-txt="transcript">↓ Transcript TXT</button></div><div class="tab-content" id="lectureTabContent"></div>`;
   el('closeLecture').addEventListener('click',()=>dlg.close());document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('[data-tab]').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderLectureTab(l,b.dataset.tab)}));renderLectureTab(l,initialTab);dlg.showModal();
 }
 function pdfSafeText(value=''){return String(value).replace(/\r/g,'').replace(/\t/g,'    ');}
 function lecturePdfSections(l,kind){
   const sections=[];
-  if(kind==='full'){
+  if(kind==='lecture'){
+    sections.push({h:'Lecture-only notes',p:'Only what was taught or explained in the recording. Textbook additions are intentionally excluded.'});
+    (l.lectureNotes||[]).forEach(n=>sections.push({h:n.h,p:n.p}));
+  } else if(kind==='full'){
     sections.push({h:'Textbook framework',p:(TEXTBOOK_REFERENCES[l.subject]||[]).join(' · ')||'Standard MBBS curriculum'});
     (l.fullNotes||[]).forEach(n=>sections.push({h:n.h,p:n.p}));
     if((l.confusingAreas||[]).length)sections.push({h:'Confusing areas clarified',p:'• '+l.confusingAreas.join('\n• ')});
@@ -588,28 +591,79 @@ function lecturePdfSections(l,kind){
   }
   return sections;
 }
-function downloadLecturePdf(l,kind='full'){
+function lecturePdfFileName(l,kind='full'){
+  const safe=(l.title||'lecture').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'').toLowerCase()||'lecture';
+  return safe+'-'+kind+'.pdf';
+}
+function buildLecturePdfBlob(l,kind='full'){
   const JsPDF=window.jspdf?.jsPDF;
-  if(!JsPDF){toast('PDF engine is still loading — try again in a moment.');return;}
+  if(!JsPDF)throw new Error('PDF engine is still loading');
   const doc=new JsPDF({unit:'mm',format:'a4'}),margin=16,maxWidth=178;
   let y=18;
-  const heading=kind==='full'?'Full Notes':kind==='revision'?'Revision Sheet':'Lecture Transcript';
+  const heading=kind==='full'?'Full Notes':kind==='lecture'?'Lecture Notes':kind==='revision'?'Revision Sheet':'Lecture Transcript';
   doc.setTextColor(25,30,35);doc.setFont('helvetica','bold');doc.setFontSize(18);doc.text(pdfSafeText(l.title),margin,y);y+=8;
   doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(95,105,115);doc.text(pdfSafeText(l.subject+' · '+fmtDate(l.date)+(l.duration?' · '+l.duration+' min':'')),margin,y);y+=8;
   doc.setTextColor(25,30,35);doc.setFont('helvetica','bold');doc.setFontSize(13);doc.text(heading,margin,y);y+=7;
   const addText=(value,size,bold,gap)=>{doc.setFont('helvetica',bold?'bold':'normal');doc.setFontSize(size);const lines=doc.splitTextToSize(pdfSafeText(value),maxWidth);const lineH=size*0.45+1.5;for(const line of lines){if(y>282){doc.addPage();y=18;}doc.text(line,margin,y);y+=lineH;}y+=gap;};
   lecturePdfSections(l,kind).forEach(section=>{addText(section.h,12,true,3);addText(section.p,10,false,5);});
   if(y>282){doc.addPage();y=18;}doc.setFontSize(8);doc.setTextColor(110,110,110);doc.text('Generated by LectureFlow MBBS',margin,289);
-  const safe=(l.title||'lecture').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'').toLowerCase()||'lecture';
-  doc.save(safe+'-'+kind+'.pdf');toast(heading+' downloaded ✓');
+  return {blob:doc.output('blob'),name:lecturePdfFileName(l,kind)};
+}
+function downloadLecturePdf(l,kind='full'){
+  try{
+    const {blob,name}=buildLecturePdfBlob(l,kind);
+    const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    const heading=kind==='full'?'Full Notes':kind==='revision'?'Revision Sheet':'Lecture Transcript';
+    toast(heading+' downloaded ✓');
+  }catch(err){toast(err?.message||'Could not create PDF');}
+}
+async function getDriveFolderId(){
+  if(!googleAccessToken)throw new Error('Connect Google Drive first');
+  if(state.settings.driveFolderId)return state.settings.driveFolderId;
+  const q=encodeURIComponent("name='LectureFlow' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+  const found=await fetch('https://www.googleapis.com/drive/v3/files?pageSize=1&fields=files(id,name)&q='+q,{headers:{Authorization:'Bearer '+googleAccessToken}});
+  if(!found.ok)throw new Error('Could not check Google Drive');
+  const data=await found.json();
+  if(data.files?.[0]?.id){state.settings.driveFolderId=data.files[0].id;saveState();return data.files[0].id}
+  const created=await fetch('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{Authorization:'Bearer '+googleAccessToken,'Content-Type':'application/json'},body:JSON.stringify({name:'LectureFlow',mimeType:'application/vnd.google-apps.folder'})});
+  if(!created.ok)throw new Error('Could not create the LectureFlow folder');
+  const folder=await created.json();state.settings.driveFolderId=folder.id;saveState();return folder.id;
+}
+async function saveLecturePdfToDrive(l,kind='full',button){
+  if(!googleAccessToken){toast('Connect Google Drive first');return}
+  const original=button?.textContent;
+  try{
+    if(button){button.disabled=true;button.textContent='Saving…'}
+    const {blob,name}=buildLecturePdfBlob(l,kind);
+    const folderId=await getDriveFolderId();
+    const metadata={name,parents:[folderId],mimeType:'application/pdf'};
+    const boundary='lectureflow-'+Date.now();
+    const body=new Blob([
+      '--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n',
+      JSON.stringify(metadata),'\r\n',
+      '--'+boundary+'\r\nContent-Type: application/pdf\r\n\r\n',
+      blob,'\r\n--'+boundary+'--'
+    ],{type:'multipart/related; boundary='+boundary});
+    const response=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',{
+      method:'POST',
+      headers:{Authorization:'Bearer '+googleAccessToken,'Content-Type':'multipart/related; boundary='+boundary},
+      body
+    });
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(data?.error?.message||'Google Drive upload failed');
+    toast('Saved to Google Drive ✓');
+  }catch(err){
+    toast(err?.message||'Could not save to Google Drive');
+  }finally{
+    if(button){button.disabled=false;button.textContent=original||'Save to Drive'}
+  }
 }
 function downloadLectureTxt(l){
   const text=[l.title,l.subject+' · '+fmtDate(l.date),'','LECTURE TRANSCRIPT','',l.transcript||'No transcript was stored for this lecture.'].join('\n');
   const blob=new Blob([text],{type:'text/plain;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=((l.title||'lecture').replace(/[^a-z0-9]+/gi,'-').toLowerCase()||'lecture')+'-transcript.txt';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Transcript TXT downloaded ✓');
 }
 function renderLectureTab(l,tab){
-  const c=el('lectureTabContent'), lectureNotes=l.lectureNotes||[], fullNotes=l.fullNotes||[], mustKnow=l.mustKnow||[], professor=l.professor||[], questions=l.questions||[], viva=l.viva||[], mcqs=l.mcqs||[], confusing=l.confusingAreas||[], readMore=l.topicsToReadMore||[];
-  if(tab==='lecture') c.innerHTML=`<div class="note-intro"><strong>Lecture-only notes:</strong> This section contains only what was taught or explained in the recording. Textbook additions are intentionally excluded.</div>`+(lectureNotes.length?lectureNotes.map(n=>`<div class="note-section"><h3>${escapeHtml(n.h)}</h3><p>${escapeHtml(n.p)}</p></div>`).join(''):`<div class="empty">No separate lecture notes were generated for this lecture.</div>`);
+  const c=el('lectureTabContent'), fullNotes=l.fullNotes||[], mustKnow=l.mustKnow||[], professor=l.professor||[], questions=l.questions||[], viva=l.viva||[], mcqs=l.mcqs||[], confusing=l.confusingAreas||[], readMore=l.topicsToReadMore||[];
   if(tab==='full') c.innerHTML=`<div class="note-intro"><strong>Textbook framework:</strong> ${escapeHtml((TEXTBOOK_REFERENCES[l.subject]||[]).join(' · ')||'Standard MBBS curriculum')}</div>`+(fullNotes.length?fullNotes.map(n=>`<div class="note-section"><h3>${escapeHtml(n.h)}</h3><p>${escapeHtml(n.p)}</p></div>`).join(''):`<div class="empty">No detailed notes available.</div>`)+`${confusing.length?`<div class="note-section"><h3>Confusing areas clarified</h3><ul>${confusing.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>`:''}${readMore.length?`<div class="note-section"><h3>Topics to read more about</h3><ul>${readMore.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>`:''}${knowledgeButtons(l)}`;
   if(tab==='revision') c.innerHTML=`<div class="note-section"><h3>5–10 minute revision sheet</h3><p class="revision-text">${escapeHtml(l.revisionNotes||l.summary||'')}</p><h4>Must know</h4><ul>${mustKnow.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>${knowledgeButtons(l)}`;
   if(tab==='professor') c.innerHTML=`<div class="note-section"><h3>Professor emphasized</h3>${professor.length?`<div class="emphasis-box"><ul>${professor.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div>`:`<p>No clear emphasis points were detected in the recording.</p>`}</div>${knowledgeButtons(l)}`;
@@ -619,6 +673,7 @@ function renderLectureTab(l,tab){
   if(tab==='transcript') c.innerHTML=`<div class="note-section"><h3>Cleaned lecture transcript</h3>${l.transcript?`<div class="transcript-text">${escapeHtml(l.transcript).replace(/\n/g,'<br>')}</div>`:`<p style="color:var(--muted)">No transcript was stored for this lecture.</p>`}</div>`;
   c.querySelectorAll('[data-state]').forEach(b=>b.addEventListener('click',()=>{l.status=b.dataset.state;l.progress=l.status==='learned'?100:l.status==='revise'?60:30;saveState();c.querySelectorAll('[data-state]').forEach(x=>x.classList.toggle('active',x.dataset.state===l.status));toast(`Marked ${statusLabel(l.status).toLowerCase()}`)}));
   document.querySelectorAll('[data-download-pdf]').forEach(b=>b.addEventListener('click',()=>downloadLecturePdf(l,b.dataset.downloadPdf)));
+  document.querySelectorAll('[data-save-drive]').forEach(b=>b.addEventListener('click',()=>saveLecturePdfToDrive(l,b.dataset.saveDrive,b)));
   document.querySelectorAll('[data-download-txt]').forEach(b=>b.addEventListener('click',()=>downloadLectureTxt(l)));
 }
 

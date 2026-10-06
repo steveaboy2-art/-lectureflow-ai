@@ -107,6 +107,7 @@ const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 let googleTokenClient = null;
 let googleAccessToken = null;
 let googleDriveConnected = false;
+let googleTokenWaiters = [];
 
 function initGoogleDriveAuth(){
   if(!window.google?.accounts?.oauth2) return false;
@@ -120,22 +121,60 @@ function initGoogleDriveAuth(){
         googleDriveConnected = true;
         state.settings.googleDriveConnected = true;
         saveState();
-        toast('Google Drive connected ✓');
         renderSettings();
+        googleTokenWaiters.splice(0).forEach(x=>x.resolve(googleAccessToken));
       } else {
-        toast('Google Drive connection was cancelled');
+        googleTokenWaiters.splice(0).forEach(x=>x.reject(new Error('Google Drive authorization is required.')));
       }
+    },
+    error_callback: ()=>{
+      googleTokenWaiters.splice(0).forEach(x=>x.reject(new Error('Google Drive authorization is required.')));
     }
   });
   return true;
 }
 
-function connectGoogleDrive(){
+function requestGoogleDriveToken(prompt=''){
+  if(!initGoogleDriveAuth()) return Promise.reject(new Error('Google services are still loading — try again in a moment.'));
+  return new Promise((resolve,reject)=>{
+    googleTokenWaiters.push({resolve,reject});
+    try{
+      googleTokenClient.requestAccessToken({prompt});
+    }catch(err){
+      googleTokenWaiters.splice(0).forEach(x=>x.reject(err));
+    }
+  });
+}
+
+async function ensureGoogleDriveAccess(){
+  if(googleAccessToken) return googleAccessToken;
+  if(!state.settings?.googleDriveConnected) throw new Error('Connect Google Drive first so LectureFlow can securely stage this file.');
+  return requestGoogleDriveToken('');
+}
+
+async function restoreGoogleDriveConnection(){
+  googleDriveConnected=!!state.settings?.googleDriveConnected;
+  if(!googleDriveConnected) return;
+  try{
+    await requestGoogleDriveToken('');
+  }catch(e){
+    googleAccessToken=null;
+    googleDriveConnected=true;
+    renderSettings();
+  }
+}
+
+async function connectGoogleDrive(){
   if(!initGoogleDriveAuth()){
     toast('Google services are still loading — try again in a moment.');
     return;
   }
-  googleTokenClient.requestAccessToken({prompt: googleDriveConnected ? '' : 'consent'});
+  try{
+    await requestGoogleDriveToken(googleDriveConnected ? '' : 'consent');
+    toast('Google Drive connected ✓');
+  }catch(err){
+    toast(err?.message||'Google Drive connection failed.');
+  }
 }
 
 
@@ -387,7 +426,7 @@ async function getAudioDurationMinutes(file){
   });
 }
 async function uploadAudioToDrive(file){
-  if(!googleAccessToken)throw new Error('Connect Google Drive first so LectureFlow can securely stage this large audio file.');
+  await ensureGoogleDriveAccess();
   const folderId=await getDriveFolderId();
   const init=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',{
     method:'POST',
@@ -614,7 +653,7 @@ async function getDriveFolderId(){
   const folder=await created.json();state.settings.driveFolderId=folder.id;saveState();return folder.id;
 }
 async function saveLecturePdfToDrive(l,kind='full',button){
-  if(!googleAccessToken){toast('Connect Google Drive first');return}
+  try{ await ensureGoogleDriveAccess(); }catch(err){ toast(err?.message||'Connect Google Drive first'); return; }
   const original=button?.textContent;
   try{
     if(button){button.disabled=true;button.textContent='Saving…'}
@@ -679,4 +718,4 @@ function renderSearch(q){q=q.trim().toLowerCase();const results=!q?state.lecture
 el('sideStreak').textContent=`${state.streak} day streak`;
 setHeader('today');
 renderToday();
-setTimeout(()=>initGoogleDriveAuth(),300);
+setTimeout(()=>{initGoogleDriveAuth();restoreGoogleDriveConnection();},300);

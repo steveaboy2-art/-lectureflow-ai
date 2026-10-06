@@ -100,6 +100,44 @@ const seedLectures = [
 ];
 
 const revisionOffsets = [0,1,7,30];
+
+const GOOGLE_CLIENT_ID = '14663212067-eb2lvc5qorg89vdgeod530ssaoaa2d1f.apps.googleusercontent.com';
+const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+let googleTokenClient = null;
+let googleAccessToken = null;
+let googleDriveConnected = false;
+
+function initGoogleDriveAuth(){
+  if(!window.google?.accounts?.oauth2) return false;
+  if(googleTokenClient) return true;
+  googleTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: GOOGLE_DRIVE_SCOPE,
+    callback: (response)=>{
+      if(response?.access_token){
+        googleAccessToken = response.access_token;
+        googleDriveConnected = true;
+        state.settings.googleDriveConnected = true;
+        saveState();
+        toast('Google Drive connected ✓');
+        renderSettings();
+      } else {
+        toast('Google Drive connection was cancelled');
+      }
+    }
+  });
+  return true;
+}
+
+function connectGoogleDrive(){
+  if(!initGoogleDriveAuth()){
+    toast('Google services are still loading — try again in a moment.');
+    return;
+  }
+  googleTokenClient.requestAccessToken({prompt: googleDriveConnected ? '' : 'consent'});
+}
+
+
 let state = loadState();
 let currentView = 'today';
 let uploadFile = null;
@@ -516,9 +554,10 @@ function renderDashboard(){
 function renderSettings(){
   el('view-settings').innerHTML=`<div class="settings-list"><div class="settings-card"><h3>AI processing</h3><p>LectureFlow uses Gemini through secure Vercel Functions. No Gemini API key is stored in your browser.</p><div class="integration-row"><div class="integration-name"><div class="integration-icon">G</div><div><strong>Gemini Flash · automatic fallback</strong><small>3.8 → 3.7 → 3.5 when demand is high</small></div></div><button class="connection-pill" id="geminiInfo">Checking…</button></div><div class="integration-row"><div class="integration-name"><div class="integration-icon">V</div><div><strong>Vercel Functions</strong><small>Secure server-side Gemini access</small></div></div><span class="connection-pill connected">Connected</span></div></div>
   <div class="settings-card"><h3>Storage right now</h3><p>Your generated lecture notes are saved in this browser using local storage. Audio is uploaded to Gemini for processing and is not kept by LectureFlow itself.</p><div class="integration-row"><div class="integration-name"><div class="integration-icon">◫</div><div><strong>On-device lecture library</strong><small>Fast MVP · works without an account</small></div></div><span class="connection-pill connected">Active</span></div></div>
-  <div class="settings-card"><h3>Google Drive automation</h3><p>Next-stage workflow: recordings added to a Drive folder can be imported automatically and the generated notes can be written back to your subject folders.</p><div class="field"><label>RECORDING FOLDER</label><input value="${escapeHtml(state.settings.driveFolder)}" /></div><div class="field" style="margin-top:12px"><label>GENERATED NOTES FOLDER</label><input value="${escapeHtml(state.settings.notesFolder)}" /></div><button class="primary-btn" id="drivePlaceholder">Drive automation coming next</button></div>
+  <div class="settings-card"><h3>Google Drive</h3><p>Connect your Google account so LectureFlow can save files it creates to your Drive. LectureFlow requests access only to files created or used by this app.</p><div class="integration-row"><div class="integration-name"><div class="integration-icon">G</div><div><strong>Google Drive</strong><small>${state.settings.googleDriveConnected?'Connected for this browser session':'Not connected'}</small></div></div><button class="primary-btn" id="connectGoogleDrive" style="max-width:220px">${state.settings.googleDriveConnected?'Reconnect Google Drive':'Connect Google Drive'}</button></div><div class="field" style="margin-top:16px"><label>GENERATED NOTES FOLDER</label><input value="${escapeHtml(state.settings.notesFolder)}" /></div></div>
   <div class="settings-card"><h3>Privacy note</h3><p>Only upload recordings you are allowed to record and process. LectureFlow sends the selected recording to Gemini to create your study material.</p></div></div>`;
-  el('drivePlaceholder').addEventListener('click',()=>toast('First we are making audio → notes rock solid'));
+  el('connectGoogleDrive')?.addEventListener('click',connectGoogleDrive);
+  if(window.google?.accounts?.oauth2) initGoogleDriveAuth();
   fetch('/api/gemini-health').then(r=>r.json()).then(d=>{const b=el('geminiInfo');if(!b)return;b.textContent=d.ok?'Live':'Unavailable';b.classList.toggle('connected',!!d.ok);b.classList.toggle('error-pill',!d.ok)}).catch(()=>{const b=el('geminiInfo');if(b){b.textContent='Unavailable';b.classList.add('error-pill')}});
 }
 
@@ -598,3 +637,4 @@ function renderSearch(q){q=q.trim().toLowerCase();const results=!q?state.lecture
 el('sideStreak').textContent=`${state.streak} day streak`;
 setHeader('today');
 renderToday();
+setTimeout(()=>initGoogleDriveAuth(),300);

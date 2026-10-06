@@ -479,9 +479,6 @@ async function processLectureReal(){
     if(!health.ok)throw new Error('Gemini is not active on this Vercel project yet. Make sure LECTUREFLOW_GEMINI_API_KEY is configured.');
     const duration=await getAudioDurationMinutes(file);
 
-    setActiveStep(0,'Creating secure upload…');
-    const initRes=await fetch('/api/gemini-upload-init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:file.name,mimeType:normalizedAudioMime(file),size:file.size})});
-    const init=await initRes.json();if(!initRes.ok)throw new Error(apiError(init,'Could not start audio upload'));
     setActiveStep(0,'Staging audio securely…');
     const driveFile=await uploadAudioToDrive(file);
     markStep(0,'done','Audio staged');

@@ -146,7 +146,16 @@ function navigate(view){
   currentView=view; document.querySelectorAll('.view').forEach(v=>v.classList.remove('active')); el('view-'+view).classList.add('active');
   document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view)); setHeader(view); render(view); window.scrollTo({top:0,behavior:'smooth'});
 }
-document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.view)));
+// Boot-safe navigation: bind at document level so navigation still works even if a later
+// initialization step throws on Safari/iPad. Dynamic buttons are covered too.
+document.addEventListener('click',(event)=>{
+  const nav=event.target.closest('[data-view]');
+  if(!nav)return;
+  const view=nav.dataset.view;
+  if(!view)return;
+  event.preventDefault();
+  try{navigate(view)}catch(err){console.error('LectureFlow navigation failed',err);}
+});
 
 function lectureCard(l){
   return `<article class="lecture-card" data-open="${l.id}">

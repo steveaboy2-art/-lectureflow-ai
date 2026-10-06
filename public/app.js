@@ -149,9 +149,9 @@ function navigate(view){
 // Boot-safe navigation: bind at document level so navigation still works even if a later
 // initialization step throws on Safari/iPad. Dynamic buttons are covered too.
 document.addEventListener('click',(event)=>{
-  const nav=event.target.closest('[data-view]');
-  if(!nav)return;
-  const view=nav.dataset.view;
+  const target=event.target.closest('[data-view],[data-goto]');
+  if(!target)return;
+  const view=target.dataset.view || target.dataset.goto;
   if(!view)return;
   event.preventDefault();
   try{navigate(view)}catch(err){console.error('LectureFlow navigation failed',err);}

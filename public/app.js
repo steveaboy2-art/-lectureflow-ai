@@ -390,7 +390,7 @@ async function uploadDirectToGemini(file,uploadUrl){
   // Stay well below Vercel's 4.5 MB function request limit.
   // The server also returns Gemini's authoritative offset so a transient
   // mismatch can be recovered without restarting a long lecture upload.
-  const chunkSize=3*1024*1024;
+  const chunkSize=8*1024*1024;
   let offset=0;
   let retries=0;
 

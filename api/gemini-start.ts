@@ -229,23 +229,31 @@ export async function POST(req: Request) {
   }
 
   const fileUri = String(body?.fileUri || '');
+  const transcript = String(body?.transcript || '');
   const mimeType = String(body?.mimeType || 'audio/mpeg');
   const subject = String(body?.subject || 'Medicine').slice(0, 80);
   const title = String(body?.title || 'Untitled lecture').slice(0, 180);
   const lectureDate = String(body?.date || '').slice(0, 20);
 
-  if (!fileUri.startsWith('https://') && !fileUri.startsWith('http://')) {
+  if (!fileUri && !transcript) {
     return Response.json(
-      { error: 'Missing Gemini file URI.' },
+      { error: 'Missing Gemini file URI or lecture transcript.' },
       { status: 400 }
+    );
+  }
+  if (transcript.length > 2500000) {
+    return Response.json(
+      { error: 'Lecture transcript is too large for final processing.' },
+      { status: 413 }
     );
   }
 
   const prompt =
-    `Subject: ${subject}\n` +
-    `Lecture title: ${title}\n` +
-    `Lecture date: ${lectureDate}\n\n` +
-    STUDY_PROMPT;
+    `Subject: ${subject}\\n` +
+    `Lecture title: ${title}\\n` +
+    `Lecture date: ${lectureDate}\\n\\n` +
+    STUDY_PROMPT +
+    (transcript ? `\\n\\nSOURCE TRANSCRIPT FROM AUTOMATICALLY PROCESSED AUDIO SEGMENTS:\\n${transcript}\\n\\nTreat the source transcript as the complete lecture source. Reconstruct the lecture coherently, preserve all medically meaningful teaching, and reconcile any duplicated or cut-off wording at segment boundaries without inventing content.` : '');
 
   const endpoint =
     'https://generativelanguage.googleapis.com/v1beta/interactions';
@@ -258,17 +266,12 @@ export async function POST(req: Request) {
   ];
 
   const requestPayload = {
-    input: [
-      {
-        type: 'text',
-        text: prompt
-      },
-      {
-        type: 'audio',
-        uri: fileUri,
-        mime_type: mimeType
-      }
-    ],
+    input: transcript
+      ? [{ type: 'text', text: prompt }]
+      : [
+          { type: 'text', text: prompt },
+          { type: 'audio', uri: fileUri, mime_type: mimeType }
+        ],
     response_format: {
       type: 'text',
       mime_type: 'application/json',

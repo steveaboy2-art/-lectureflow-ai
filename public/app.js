@@ -553,7 +553,12 @@ function normalizeGeneratedLecture(result,meta){
     revisionNotes:String(result?.revisionNotes||result?.summary||''),
     lectureNotes:arr(result?.lectureNotes),
     professor:arr(result?.professor), mustKnow:arr(result?.mustKnow), fullNotes:arr(result?.fullNotes),
-    questions:aasync function processLectureReal(){
+    questions:arr(result?.questions), viva:arr(result?.viva), mcqs:arr(result?.mcqs),
+    confusingAreas:arr(result?.confusingAreas), topicsToReadMore:arr(result?.topicsToReadMore),
+    transcript:String(result?.transcript||'')
+  };
+}
+async function processLectureReal(){
   if(!uploadFile)return;
   const file=uploadFile,btn=el('processBtn');btn.disabled=true;renderProcessingSteps();
   const title=el('titleInput').value.trim(),subject=el('subjectInput').value,date=el('dateInput').value||getToday();

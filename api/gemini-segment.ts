@@ -15,9 +15,28 @@ export async function POST(req: Request) {
   if(req.method!=='POST')return new Response('Method not allowed',{status:405});
   const apiKey=Netlify.env.get('LECTUREFLOW_GEMINI_API_KEY');
   if(!apiKey)return Response.json({error:'Gemini API key is not configured.'},{status:503});
-  let body:any;try{body=await req.json()}catch{return Response.json({error:'Invalid request.'},{status:400})}
-  const audioBase64=String(body?.audioBase64||''),mimeType='audio/mp3',segment=Math.max(1,Number(body?.segment||1)),totalSegments=Math.max(segment,Number(body?.totalSegments||segment)),subject=String(body?.subject||'Medicine').slice(0,80),title=String(body?.title||'Untitled lecture').slice(0,180),lectureDate=String(body?.date||'').slice(0,20);
-  if(!audioBase64||audioBase64.length>3300000)return Response.json({error:'Audio segment is missing or too large.'},{status:413});
+  const url=new URL(req.url);
+  let body:any={};
+  let audioBase64='';
+  let mimeType='audio/mp3';
+  try{
+    if((req.headers.get('content-type')||'').toLowerCase().includes('audio/')){
+      const bytes=new Uint8Array(await req.arrayBuffer());
+      if(!bytes.length)return Response.json({error:'Audio segment is missing.'},{status:400});
+      if(bytes.length>1800000)return Response.json({error:'Audio segment is too large.'},{status:413});
+      let binary='';const sliceSize=0x8000;
+      for(let i=0;i<bytes.length;i+=sliceSize)binary+=String.fromCharCode(...bytes.subarray(i,Math.min(i+sliceSize,bytes.length)));
+      audioBase64=Buffer.from(bytes).toString('base64');
+      mimeType='audio/mp3';
+      body={segment:url.searchParams.get('segment'),totalSegments:url.searchParams.get('totalSegments'),subject:url.searchParams.get('subject'),title:url.searchParams.get('title'),date:url.searchParams.get('date')};
+    }else{
+      body=await req.json();
+      audioBase64=String(body?.audioBase64||'');
+      mimeType='audio/mp3';
+    }
+  }catch{return Response.json({error:'Invalid audio request.'},{status:400})}
+  const segment=Math.max(1,Number(body?.segment||1)),totalSegments=Math.max(segment,Number(body?.totalSegments||segment)),subject=String(body?.subject||'Medicine').slice(0,80),title=String(body?.title||'Untitled lecture').slice(0,180),lectureDate=String(body?.date||'').slice(0,20);
+  if(!audioBase64||audioBase64.length>2500000)return Response.json({error:'Audio segment is missing or too large.'},{status:413});
   const prompt=`Subject: ${subject}\nLecture title: ${title}\nLecture date: ${lectureDate}\nSegment: ${segment} of ${totalSegments}\n\n${SEGMENT_PROMPT}`;
   const models=['gemini-3.8-flash','gemini-3.7-flash','gemini-3.6-flash','gemini-3.5-flash'];let lastMessage='Gemini is temporarily unavailable.';const attemptedModels:string[]=[];
   for(let index=0;index<models.length;index++){

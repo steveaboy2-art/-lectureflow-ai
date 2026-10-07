@@ -249,11 +249,11 @@ export async function POST(req: Request) {
   }
 
   const prompt =
-    `Subject: ${subject}\\n` +
-    `Lecture title: ${title}\\n` +
-    `Lecture date: ${lectureDate}\\n\\n` +
+    `Subject: ${subject}\n` +
+    `Lecture title: ${title}\n` +
+    `Lecture date: ${lectureDate}\n\n` +
     STUDY_PROMPT +
-    (transcript ? `\\n\\nSOURCE TRANSCRIPT FROM AUTOMATICALLY PROCESSED AUDIO SEGMENTS:\\n${transcript}\\n\\nTreat the source transcript as the complete lecture source. Reconstruct the lecture coherently, preserve all medically meaningful teaching, and reconcile any duplicated or cut-off wording at segment boundaries without inventing content.` : '');
+    (transcript ? `\n\nSOURCE TRANSCRIPT FROM AUTOMATICALLY PROCESSED AUDIO SEGMENTS:\n${transcript}\n\nTreat the source transcript as the complete lecture source. Reconstruct the lecture coherently, preserve all medically meaningful teaching, and reconcile any duplicated or cut-off wording at segment boundaries without inventing content.` : '');
 
   const endpoint =
     'https://generativelanguage.googleapis.com/v1beta/interactions';

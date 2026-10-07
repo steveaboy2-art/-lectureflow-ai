@@ -456,40 +456,72 @@ async function processAudioIntoTranscript(file,subject,title,date,durationMinute
   if(!transcripts.length)throw new Error('Gemini could not extract speech from the recording.');return {transcript:transcripts.join('\n\n'),totalSegments,durationMinutes:durationMinutes||Math.max(1,Math.round(totalSeconds/60))};
 }
 async function uploadDirectToGemini(file,uploadUrl){
-  // Safari/iPad can reject a raw string upload URL with
-  // "The string did not match the expected pattern." Normalize it
-  // before passing it to fetch and fail with a useful message if it
-  // is genuinely malformed.
-  let targetUrl;
-  try{
-    targetUrl=new URL(String(uploadUrl||'').trim()).toString();
-  }catch{
-    throw new Error('Gemini returned an invalid upload URL. Please try again.');
-  }
-  const chunkSize=8*1024*1024;
-  let offset=0,retries=0;
+  // Stay well below Vercel's 4.5 MB function request limit.
+  // The server also returns Gemini's authoritative offset so a transient
+  // mismatch can be recovered without restarting a long lecture upload.
+  const chunkSize=3*1024*1024;
+  let offset=0;
+  let retries=0;
+
   while(offset<file.size){
-    const end=Math.min(offset+chunkSize,file.size),chunk=file.slice(offset,end),finalChunk=end===file.size;
-    let response=null,lastError=null;
+    const end=Math.min(offset+chunkSize,file.size);
+    const chunk=file.slice(offset,end);
+    const finalChunk=end===file.size;
+
+    let response=null;
+    let lastNetworkError=null;
     for(let attempt=0;attempt<4;attempt++){
-      try{response=await fetch(targetUrl,{method:'POST',headers:{'X-Goog-Upload-Offset':String(offset),'X-Goog-Upload-Command':finalChunk?'upload, finalize':'upload'},body:chunk});break}
-      catch(err){lastError=err;await sleep(500*(attempt+1))}
+      try{
+        response=await fetch('/api/gemini-upload-init',{
+          method:'POST',
+          headers:{
+            'Content-Type':'application/octet-stream',
+            'x-lectureflow-upload-url':uploadUrl,
+            'x-lectureflow-upload-offset':String(offset),
+            'x-lectureflow-upload-final':finalChunk?'1':'0'
+          },
+          body:chunk
+        });
+        break;
+      }catch(err){
+        lastNetworkError=err;
+        await sleep(400*(attempt+1));
+      }
     }
-    if(!response)throw new Error('Could not reach Gemini directly from this device. '+(lastError?.message||'upload request failed'));
-    const text=await response.text();let data={};try{data=JSON.parse(text)}catch{}
+    if(!response)throw new Error('Network error while uploading audio: '+(lastNetworkError?.message||'request failed'));
+
+    const text=await response.text();
+    let data={};
+    try{data=JSON.parse(text);}catch{}
+
     if(!response.ok){
-      const headerOffset=Number(response.headers.get('x-goog-upload-offset')||'');
-      if(Number.isFinite(headerOffset)&&headerOffset>=0&&headerOffset<=file.size&&retries<5){offset=headerOffset;retries++;await sleep(250*retries);continue}
-      throw new Error(data?.error?.message||data?.error||text||('Gemini audio upload failed — HTTP '+response.status));
+      const serverOffset=Number(data?.serverOffset);
+
+      // If Gemini and the browser disagree about the current position,
+      // resume from Gemini's position rather than throwing away the upload.
+      if(Number.isFinite(serverOffset) && serverOffset>=0 && serverOffset<=file.size && retries<5){
+        offset=serverOffset;
+        retries++;
+        await sleep(250*retries);
+        continue;
+      }
+
+      throw new Error(data?.error||text||'Audio upload failed');
     }
-    retries=0;if(finalChunk)return data;
-    const nextOffset=Number(response.headers.get('x-goog-upload-offset')||data?.nextOffset);
-    if(!Number.isFinite(nextOffset)||nextOffset<=offset||nextOffset>file.size)throw new Error('Gemini returned an invalid upload offset.');
-    offset=nextOffset;
+
+    retries=0;
+
+    if(finalChunk)return data;
+
+    const serverNextOffset=Number(data?.nextOffset);
+    if(!Number.isFinite(serverNextOffset) || serverNextOffset<=offset || serverNextOffset>file.size){
+      throw new Error('Gemini returned an invalid upload offset.');
+    }
+    offset=serverNextOffset;
   }
+
   throw new Error('Audio upload did not finish.');
-}
-async function waitForGeminiFile(fileName){
+}async function waitForGeminiFile(fileName){
   if(!fileName)return;
   for(let i=0;i<40;i++){
     const r=await fetch(`/api/gemini-file-status?name=${encodeURIComponent(fileName)}`);const d=await r.json();
@@ -521,36 +553,39 @@ function normalizeGeneratedLecture(result,meta){
     revisionNotes:String(result?.revisionNotes||result?.summary||''),
     lectureNotes:arr(result?.lectureNotes),
     professor:arr(result?.professor), mustKnow:arr(result?.mustKnow), fullNotes:arr(result?.fullNotes),
-    questions:arr(result?.questions), viva:arr(result?.viva), mcqs:arr(result?.mcqs),
-    confusingAreas:arr(result?.confusingAreas), topicsToReadMore:arr(result?.topicsToReadMore),
-    transcript:String(result?.transcript||'')
-  };
-}
-async function processLectureReal(){
+    questions:aasync function processLectureReal(){
   if(!uploadFile)return;
   const file=uploadFile,btn=el('processBtn');btn.disabled=true;renderProcessingSteps();
   const title=el('titleInput').value.trim(),subject=el('subjectInput').value,date=el('dateInput').value||getToday();
   try{
-    const health=await fetch('/api/gemini-health').then(r=>r.json()).catch(()=>({ok:false}));if(!health.ok)throw new Error('Gemini is not active on this Vercel project yet. Make sure LECTUREFLOW_GEMINI_API_KEY is configured.');
+    const health=await fetch('/api/gemini-health').then(r=>r.json()).catch(()=>({ok:false}));
+    if(!health.ok)throw new Error('Gemini is not active on this Vercel project yet. Make sure LECTUREFLOW_GEMINI_API_KEY is configured.');
     const duration=await getAudioDurationMinutes(file);
-    setActiveStep(0,'Uploading the full recording to Gemini…');
+    setActiveStep(0,'Creating secure upload…');
     const initRes=await fetch('/api/gemini-upload-init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:file.name,mimeType:normalizedAudioMime(file),size:file.size})});
     const init=await initRes.json();if(!initRes.ok)throw new Error(apiError(init,'Could not start audio upload'));
-    const uploaded=await uploadDirectToGemini(file,init.uploadUrl),fileInfo=uploaded?.file||uploaded;
+    const uploaded=await uploadDirectToGemini(file,init.uploadUrl);
+    const fileInfo=uploaded?.file||uploaded;
     if(!fileInfo?.uri)throw new Error('Gemini uploaded the audio but did not return a file reference.');
     markStep(0,'done','Uploaded');
-    setActiveStep(1,'Preparing the recording…');
+    setActiveStep(1,'Preparing audio…');
     if(fileInfo.name)await waitForGeminiFile(fileInfo.name);
     markStep(1,'done','Ready');
-    setActiveStep(2,'Gemini is processing the complete lecture…');
+    setActiveStep(2,'Gemini is listening…');
     const startRes=await fetch('/api/gemini-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileUri:fileInfo.uri,mimeType:fileInfo.mimeType||normalizedAudioMime(file),subject,title,date})});
     const started=await startRes.json();if(!startRes.ok||!started.interactionId)throw new Error(apiError(started,'Could not start lecture processing'));
     const result=await pollInteraction(started.interactionId);
-    markStep(2,'done','Notes complete');markStep(3,'done','Revision ready');markStep(4,'done','Questions ready');el('processMessage').textContent='Done — opening your lecture notes.';
-    const lecture=normalizeGeneratedLecture(result,{subject,title,date,duration,sourceFileName:file.name});state.lectures.unshift(lecture);state.processedTotal=(state.processedTotal||0)+1;saveState();uploadFile=null;toast('Lecture processed successfully');setTimeout(()=>openLecture(lecture.id),450);
+    markStep(2,'done','Notes complete');markStep(3,'done','Revision ready');markStep(4,'done','Questions ready');
+    el('processMessage').textContent='Done — opening your lecture notes.';
+    const lecture=normalizeGeneratedLecture(result,{subject,title,date,duration,sourceFileName:file.name});
+    state.lectures.unshift(lecture);state.processedTotal=(state.processedTotal||0)+1;saveState();uploadFile=null;
+    toast('Lecture processed successfully');setTimeout(()=>openLecture(lecture.id),450);
   }catch(err){
     console.error(err);const active=[0,1,2,3,4].find(i=>el('ps'+i)?.classList.contains('active'));if(active!==undefined)markStep(active,'error','Stopped');
     el('processMessage').innerHTML=`<strong>Couldn’t process this lecture.</strong><br>${escapeHtml(err?.message||'Unknown error')}<br><button class="outline-btn retry-btn" id="retryProcess">Try again</button>`;
+    el('retryProcess')?.addEventListener('click',processLectureReal);btn.disabled=false;
+  }
+}${escapeHtml(err?.message||'Unknown error')}<br><button class="outline-btn retry-btn" id="retryProcess">Try again</button>`;
     el('retryProcess')?.addEventListener('click',processLectureReal);btn.disabled=false;
   }
 }

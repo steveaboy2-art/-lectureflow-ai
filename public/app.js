@@ -456,6 +456,16 @@ async function processAudioIntoTranscript(file,subject,title,date,durationMinute
   if(!transcripts.length)throw new Error('Gemini could not extract speech from the recording.');return {transcript:transcripts.join('\n\n'),totalSegments,durationMinutes:durationMinutes||Math.max(1,Math.round(totalSeconds/60))};
 }
 async function uploadDirectToGemini(file,uploadUrl){
+  // Safari/iPad can reject a raw string upload URL with
+  // "The string did not match the expected pattern." Normalize it
+  // before passing it to fetch and fail with a useful message if it
+  // is genuinely malformed.
+  let targetUrl;
+  try{
+    targetUrl=new URL(String(uploadUrl||'').trim()).toString();
+  }catch{
+    throw new Error('Gemini returned an invalid upload URL. Please try again.');
+  }
   const chunkSize=8*1024*1024;
   let offset=0,retries=0;
   while(offset<file.size){

@@ -404,7 +404,7 @@ function updateProcessButton(){el('processBtn').disabled=!(uploadFile && el('tit
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 function apiError(data,fallback){return data?.error || data?.detail?.error?.message || fallback}
 function renderProcessingSteps(){
-  const steps=['Split audio automatically','Transcribe audio segments','Create lecture notes','Build revision sheet','Generate recall + MCQs'];
+  const steps=['Upload full recording','Prepare recording','Create lecture notes','Build revision sheet','Generate recall + MCQs'];
   el('processingArea').innerHTML=`<div class="processing">${steps.map((s,i)=>`<div class="process-step ${i===0?'active':''}" id="ps${i}"><div class="step-icon">${i+1}</div><div><strong>${s}</strong><small>${i===0?'Starting…':'Waiting'}</small></div></div>`).join('')}<div class="process-message" id="processMessage">Keep this page open while LectureFlow processes the recording.</div></div>`;
 }
 function markStep(index,status,label){

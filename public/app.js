@@ -425,52 +425,68 @@ async function getAudioDurationMinutes(file){
     audio.preload='metadata';audio.onloadedmetadata=()=>finish(Number.isFinite(audio.duration)?Math.max(1,Math.round(audio.duration/60)):0);audio.onerror=()=>finish(0);audio.src=url;setTimeout(()=>finish(0),3500);
   });
 }
-async function uploadAudioToDrive(file){
-  await ensureGoogleDriveAccess();
-  const folderId=await getDriveFolderId();
-  const init=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',{
-    method:'POST',
-    headers:{
-      Authorization:'Bearer '+googleAccessToken,
-      'Content-Type':'application/json',
-      'X-Upload-Content-Type':normalizedAudioMime(file),
-      'X-Upload-Content-Length':String(file.size)
-    },
-    body:JSON.stringify({name:file.name,parents:[folderId],mimeType:normalizedAudioMime(file)})
-  });
-  if(!init.ok){
-    const d=await init.json().catch(()=>({}));
-    throw new Error(d?.error?.message||'Could not start the secure audio upload.');
-  }
-  const sessionUrl=init.headers.get('Location');
-  if(!sessionUrl)throw new Error('Google Drive did not return an upload session.');
-  const chunkSize=4*1024*1024;
+async function uploadDirectToGemini(file,uploadUrl){
+  // Gemini requires resumable-upload chunks to be multiples of 8 MiB.
+  // Send those chunks directly from the browser so Vercel's ~4.5 MB
+  // serverless request limit is not in the upload path.
+  const chunkSize=8*1024*1024;
   let offset=0;
+  let retries=0;
+
   while(offset<file.size){
     const end=Math.min(offset+chunkSize,file.size);
     const chunk=file.slice(offset,end);
-    const response=await fetch(sessionUrl,{
-      method:'PUT',
-      headers:{'Content-Range':`bytes ${offset}-${end-1}/${file.size}`},
-      body:chunk
-    });
-    if(response.status===308){
-      const range=response.headers.get('Range')||'';
-      const m=range.match(/bytes=0-(\\d+)/i);
-      const serverOffset=m?Number(m[1])+1:end;
-      if(!Number.isFinite(serverOffset)||serverOffset<=offset)throw new Error('Google Drive returned an invalid upload position.');
-      offset=serverOffset;
-      continue;
+    const finalChunk=end===file.size;
+
+    let response=null;
+    let lastError=null;
+    for(let attempt=0;attempt<4;attempt++){
+      try{
+        response=await fetch(uploadUrl,{
+          method:'POST',
+          headers:{
+            'X-Goog-Upload-Offset':String(offset),
+            'X-Goog-Upload-Command':finalChunk?'upload, finalize':'upload'
+          },
+          body:chunk
+        });
+        break;
+      }catch(err){
+        lastError=err;
+        await sleep(500*(attempt+1));
+      }
     }
-    const data=await response.json().catch(()=>({}));
-    if(!response.ok)throw new Error(data?.error?.message||'Google Drive audio upload failed.');
-    return data;
+
+    if(!response){
+      throw new Error('Could not reach Gemini directly from this device. '+(lastError?.message||'upload request failed'));
+    }
+
+    const text=await response.text();
+    let data={};
+    try{data=JSON.parse(text)}catch{}
+
+    if(!response.ok){
+      const headerOffset=Number(response.headers.get('x-goog-upload-offset')||'');
+      if(Number.isFinite(headerOffset)&&headerOffset>=0&&headerOffset<=file.size&&retries<5){
+        offset=headerOffset;
+        retries++;
+        await sleep(250*retries);
+        continue;
+      }
+      throw new Error(data?.error?.message||data?.error||text||('Gemini audio upload failed — HTTP '+response.status));
+    }
+
+    retries=0;
+    if(finalChunk)return data;
+
+    const nextOffset=Number(response.headers.get('x-goog-upload-offset')||data?.nextOffset);
+    if(!Number.isFinite(nextOffset)||nextOffset<=offset||nextOffset>file.size){
+      throw new Error('Gemini returned an invalid upload offset.');
+    }
+    offset=nextOffset;
   }
-  throw new Error('Google Drive audio upload did not finish.');
-}
-async function uploadDirectToGemini(file,uploadUrl){
-  // Kept only as a compatibility fallback for older deployments.
-  throw new Error('Direct Gemini upload is unavailable on this device.');
+
+  throw new Error('Audio upload did not finish.');
 }
 async function waitForGeminiFile(fileName){
   if(!fileName)return;
@@ -518,13 +534,10 @@ async function processLectureReal(){
     if(!health.ok)throw new Error('Gemini is not active on this Vercel project yet. Make sure LECTUREFLOW_GEMINI_API_KEY is configured.');
     const duration=await getAudioDurationMinutes(file);
 
-    setActiveStep(0,'Staging audio securely…');
-    const driveFile=await uploadAudioToDrive(file);
-    markStep(0,'done','Audio staged');
-    setActiveStep(1,'Sending audio to Gemini…');
-    const bridgeRes=await fetch('/api/gemini-upload-from-drive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileId:driveFile.id,accessToken:googleAccessToken,fileName:file.name,mimeType:normalizedAudioMime(file),size:file.size})});
-    const bridge=await bridgeRes.json();if(!bridgeRes.ok)throw new Error(apiError(bridge,'Could not send the audio to Gemini'));
-    const uploaded=bridge;
+    setActiveStep(0,'Creating secure upload…');
+    const initRes=await fetch('/api/gemini-upload-init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:file.name,mimeType:normalizedAudioMime(file),size:file.size})});
+    const init=await initRes.json();if(!initRes.ok)throw new Error(apiError(init,'Could not start audio upload'));
+    const uploaded=await uploadDirectToGemini(file,init.uploadUrl);
     const fileInfo=uploaded?.file||uploaded;
     if(!fileInfo?.uri)throw new Error('Gemini uploaded the audio but did not return a file reference.');
     markStep(0,'done','Uploaded');

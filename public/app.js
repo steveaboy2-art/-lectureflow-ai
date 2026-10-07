@@ -472,7 +472,7 @@ async function uploadDirectToGemini(file,uploadUrl){
     const end=Math.min(offset+chunkSize,file.size),chunk=file.slice(offset,end),finalChunk=end===file.size;
     let response=null,lastError=null;
     for(let attempt=0;attempt<4;attempt++){
-      try{response=await fetch(uploadUrl,{method:'POST',headers:{'X-Goog-Upload-Offset':String(offset),'X-Goog-Upload-Command':finalChunk?'upload, finalize':'upload'},body:chunk});break}
+      try{response=await fetch(targetUrl,{method:'POST',headers:{'X-Goog-Upload-Offset':String(offset),'X-Goog-Upload-Command':finalChunk?'upload, finalize':'upload'},body:chunk});break}
       catch(err){lastError=err;await sleep(500*(attempt+1))}
     }
     if(!response)throw new Error('Could not reach Gemini directly from this device. '+(lastError?.message||'upload request failed'));

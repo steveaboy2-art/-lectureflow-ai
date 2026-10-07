@@ -590,10 +590,8 @@ async function processLectureReal(){
     el('processMessage').innerHTML=`<strong>Couldn’t process this lecture.</strong><br>${escapeHtml(err?.message||'Unknown error')}<br><button class="outline-btn retry-btn" id="retryProcess">Try again</button>`;
     el('retryProcess')?.addEventListener('click',processLectureReal);btn.disabled=false;
   }
-}${escapeHtml(err?.message||'Unknown error')}<br><button class="outline-btn retry-btn" id="retryProcess">Try again</button>`;
-    el('retryProcess')?.addEventListener('click',processLectureReal);btn.disabled=false;
-  }
 }
+
 
 function renderLibrary(){
   const subjects=['All',...new Set(state.lectures.map(l=>l.subject))];

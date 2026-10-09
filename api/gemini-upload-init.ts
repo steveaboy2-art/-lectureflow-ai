@@ -13,7 +13,8 @@ const ALLOWED_AUDIO_TYPES = new Set([
   'audio/opus'
 ]);
 
-// Gemini resumable uploads require non-final chunks to be multiples of 8 MiB.\nconst MAX_CHUNK_SIZE = 3 * 1024 * 1024;
+// Gemini relay chunks stay below Vercel's request limit.
+const MAX_CHUNK_SIZE = 3 * 1024 * 1024;
 
 function cleanName(name: string) {
   return String(name || 'lecture-audio')

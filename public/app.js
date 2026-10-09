@@ -456,72 +456,30 @@ async function processAudioIntoTranscript(file,subject,title,date,durationMinute
   if(!transcripts.length)throw new Error('Gemini could not extract speech from the recording.');return {transcript:transcripts.join('\n\n'),totalSegments,durationMinutes:durationMinutes||Math.max(1,Math.round(totalSeconds/60))};
 }
 async function uploadDirectToGemini(file,uploadUrl){
-  // Stay well below Vercel's 4.5 MB function request limit.
-  // The server also returns Gemini's authoritative offset so a transient
-  // mismatch can be recovered without restarting a long lecture upload.
-  const chunkSize=3*1024*1024;
-  let offset=0;
-  let retries=0;
-
+  const chunkSize=8*1024*1024;
+  let offset=0,retries=0;
   while(offset<file.size){
-    const end=Math.min(offset+chunkSize,file.size);
-    const chunk=file.slice(offset,end);
-    const finalChunk=end===file.size;
-
-    let response=null;
-    let lastNetworkError=null;
+    const end=Math.min(offset+chunkSize,file.size),chunk=file.slice(offset,end),finalChunk=end===file.size;
+    let response=null,lastError=null;
     for(let attempt=0;attempt<4;attempt++){
-      try{
-        response=await fetch('/api/gemini-upload-init',{
-          method:'POST',
-          headers:{
-            'Content-Type':'application/octet-stream',
-            'x-lectureflow-upload-url':uploadUrl,
-            'x-lectureflow-upload-offset':String(offset),
-            'x-lectureflow-upload-final':finalChunk?'1':'0'
-          },
-          body:chunk
-        });
-        break;
-      }catch(err){
-        lastNetworkError=err;
-        await sleep(400*(attempt+1));
-      }
+      try{response=await fetch(uploadUrl,{method:'POST',headers:{'X-Goog-Upload-Offset':String(offset),'X-Goog-Upload-Command':finalChunk?'upload, finalize':'upload'},body:chunk});break}
+      catch(err){lastError=err;await sleep(500*(attempt+1))}
     }
-    if(!response)throw new Error('Network error while uploading audio: '+(lastNetworkError?.message||'request failed'));
-
-    const text=await response.text();
-    let data={};
-    try{data=JSON.parse(text);}catch{}
-
+    if(!response)throw new Error('Could not reach Gemini directly from this device. '+(lastError?.message||'upload request failed'));
+    const text=await response.text();let data={};try{data=JSON.parse(text)}catch{}
     if(!response.ok){
-      const serverOffset=Number(data?.serverOffset);
-
-      // If Gemini and the browser disagree about the current position,
-      // resume from Gemini's position rather than throwing away the upload.
-      if(Number.isFinite(serverOffset) && serverOffset>=0 && serverOffset<=file.size && retries<5){
-        offset=serverOffset;
-        retries++;
-        await sleep(250*retries);
-        continue;
-      }
-
-      throw new Error(data?.error||text||'Audio upload failed');
+      const headerOffset=Number(response.headers.get('x-goog-upload-offset')||'');
+      if(Number.isFinite(headerOffset)&&headerOffset>=0&&headerOffset<=file.size&&retries<5){offset=headerOffset;retries++;await sleep(250*retries);continue}
+      throw new Error(data?.error?.message||data?.error||text||('Gemini audio upload failed — HTTP '+response.status));
     }
-
-    retries=0;
-
-    if(finalChunk)return data;
-
-    const serverNextOffset=Number(data?.nextOffset);
-    if(!Number.isFinite(serverNextOffset) || serverNextOffset<=offset || serverNextOffset>file.size){
-      throw new Error('Gemini returned an invalid upload offset.');
-    }
-    offset=serverNextOffset;
+    retries=0;if(finalChunk)return data;
+    const nextOffset=Number(response.headers.get('x-goog-upload-offset')||data?.nextOffset);
+    if(!Number.isFinite(nextOffset)||nextOffset<=offset||nextOffset>file.size)throw new Error('Gemini returned an invalid upload offset.');
+    offset=nextOffset;
   }
-
   throw new Error('Audio upload did not finish.');
-}async function waitForGeminiFile(fileName){
+}
+async function waitForGeminiFile(fileName){
   if(!fileName)return;
   for(let i=0;i<40;i++){
     const r=await fetch(`/api/gemini-file-status?name=${encodeURIComponent(fileName)}`);const d=await r.json();

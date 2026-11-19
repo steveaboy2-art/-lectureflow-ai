@@ -456,24 +456,40 @@ async function processAudioIntoTranscript(file,subject,title,date,durationMinute
   if(!transcripts.length)throw new Error('Gemini could not extract speech from the recording.');return {transcript:transcripts.join('\n\n'),totalSegments,durationMinutes:durationMinutes||Math.max(1,Math.round(totalSeconds/60))};
 }
 async function uploadDirectToGemini(file,uploadUrl){
-  const chunkSize=8*1024*1024;
+  // Relay 3 MB chunks through our server to avoid Safari/iOS CORS and
+  // Vercel's request-body limit. The server forwards each chunk to Gemini.
+  const chunkSize=3*1024*1024;
   let offset=0,retries=0;
   while(offset<file.size){
     const end=Math.min(offset+chunkSize,file.size),chunk=file.slice(offset,end),finalChunk=end===file.size;
     let response=null,lastError=null;
     for(let attempt=0;attempt<4;attempt++){
-      try{response=await fetch(uploadUrl,{method:'POST',headers:{'X-Goog-Upload-Offset':String(offset),'X-Goog-Upload-Command':finalChunk?'upload, finalize':'upload'},body:chunk});break}
-      catch(err){lastError=err;await sleep(500*(attempt+1))}
+      try{
+        response=await fetch('/api/gemini-upload-init',{
+          method:'POST',
+          headers:{
+            'Content-Type':'application/octet-stream',
+            'x-lectureflow-upload-url':uploadUrl,
+            'x-lectureflow-upload-offset':String(offset),
+            'x-lectureflow-upload-final':finalChunk?'1':'0'
+          },
+          body:chunk
+        });
+        break;
+      }catch(err){lastError=err;await sleep(400*(attempt+1))}
     }
-    if(!response)throw new Error('Could not reach Gemini directly from this device. '+(lastError?.message||'upload request failed'));
+    if(!response)throw new Error('Could not reach LectureFlow upload server. '+(lastError?.message||'upload request failed'));
     const text=await response.text();let data={};try{data=JSON.parse(text)}catch{}
     if(!response.ok){
-      const headerOffset=Number(response.headers.get('x-goog-upload-offset')||'');
-      if(Number.isFinite(headerOffset)&&headerOffset>=0&&headerOffset<=file.size&&retries<5){offset=headerOffset;retries++;await sleep(250*retries);continue}
-      throw new Error(data?.error?.message||data?.error||text||('Gemini audio upload failed — HTTP '+response.status));
+      const serverOffset=Number(data?.serverOffset);
+      if(Number.isFinite(serverOffset)&&serverOffset>=0&&serverOffset<=file.size&&retries<5){
+        offset=serverOffset;retries++;await sleep(250*retries);continue;
+      }
+      throw new Error(data?.error||text||('Audio upload failed — HTTP '+response.status));
     }
-    retries=0;if(finalChunk)return data;
-    const nextOffset=Number(response.headers.get('x-goog-upload-offset')||data?.nextOffset);
+    retries=0;
+    if(finalChunk)return data;
+    const nextOffset=Number(data?.nextOffset);
     if(!Number.isFinite(nextOffset)||nextOffset<=offset||nextOffset>file.size)throw new Error('Gemini returned an invalid upload offset.');
     offset=nextOffset;
   }

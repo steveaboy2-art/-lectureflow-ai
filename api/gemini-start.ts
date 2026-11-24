@@ -233,7 +233,7 @@ export async function POST(req: Request) {
   const mimeType = String(body?.mimeType || 'audio/mpeg');
   const subject = String(body?.subject || 'Medicine').slice(0, 80);
   const title = String(body?.title || 'Untitled lecture').slice(0, 180);
-  const lectureDate = String(body?.date || '').slice(0, 20);
+  const lectureDate = String(body?.date || '').slice(0, 20); const attempt = Math.max(0, Number(body?.attempt || 0));
 
   if (!fileUri && !transcript) {
     return Response.json(
@@ -258,13 +258,12 @@ export async function POST(req: Request) {
   const endpoint =
     'https://generativelanguage.googleapis.com/v1beta/interactions';
 
-  const models = [
-    'gemini-3.8-flash',
+  const baseModels = [    'gemini-3.8-flash',
     'gemini-3.6-flash',
     'gemini-3.5-flash-lite',
     'gemini-3.1-flash-lite',
     'gemini-3-flash-preview'
-  ];
+  ]; const offset = attempt % baseModels.length; const models = [...baseModels.slice(offset), ...baseModels.slice(0, offset)];
 
   const requestPayload = {
     input: transcript
@@ -302,7 +301,7 @@ export async function POST(req: Request) {
 
     const data = await upstream.json().catch(() => ({}));
 
-    if (upstream.ok && data.id) {
+    if (upstream.ok && data.id) { console.log('gemini-start started:', { model, attempt });
       return Response.json({
         interactionId: data.id,
         status: data.status || 'in_progress',

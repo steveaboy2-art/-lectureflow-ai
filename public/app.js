@@ -524,8 +524,8 @@ async function processAudioIntoTranscript(file,subject,title,date,durationMinute
   if(!window.lamejs?.Mp3Encoder)throw new Error('MP3 encoder unavailable. Refresh once and try again.');
   setActiveStep(0,'Decoding and splitting the recording automatically…');const audioBuffer=await decodeUploadedAudio(file),totalSeconds=audioBuffer.duration;
   if(!Number.isFinite(totalSeconds)||totalSeconds<=0)throw new Error('Could not determine the recording duration.');
-  const totalSegments=Math.ceil(totalSeconds/AUDIO_SEGMENT_SECONDS),transcripts=[];
-  for(let index=0;index<totalSegments;index++){const start=index*AUDIO_SEGMENT_SECONDS,end=Math.min(totalSeconds,start+AUDIO_SEGMENT_SECONDS);el('processMessage').textContent=`Preparing segment ${index+1}/${totalSegments} automatically…`;const segmentBlob=encodeAudioSegment(audioBuffer,start,end);el('processMessage').textContent=`Uploading and transcribing segment ${index+1}/${totalSegments}…`;const interactionId=await createGeminiAudioSegment(segmentBlob,index,totalSegments,subject,title,date);const segmentResult=await pollInteraction(interactionId),transcript=String(segmentResult?.transcript||'').trim();if(transcript)transcripts.push(`[Segment ${index+1} — ${Math.round(start)}s to ${Math.round(end)}s]\n${transcript}`);markStep(0,'active',`Segment ${index+1}/${totalSegments} complete`);await new Promise(r=>setTimeout(r,0))}
+  const totalSegments=Math.ceil(totalSeconds/AUDIO_SEGMENT_SECONDS),transcripts=[],segCacheKey=`${file.name}:${file.size}:${file.lastModified}`;let segCache={};try{const raw=JSON.parse(localStorage.getItem('lectureflow-seg-cache-v1')||'null');if(raw&&raw.key===segCacheKey&&raw.segments)segCache=raw.segments}catch{}
+  for(let index=0;index<totalSegments;index++){const start=index*AUDIO_SEGMENT_SECONDS,end=Math.min(totalSeconds,start+AUDIO_SEGMENT_SECONDS);let transcript=typeof segCache[index]==='string'?segCache[index]:'';if(!transcript){el('processMessage').textContent=`Preparing segment ${index+1}/${totalSegments} automatically…`;const segmentBlob=encodeAudioSegment(audioBuffer,start,end);el('processMessage').textContent=`Uploading and transcribing segment ${index+1}/${totalSegments}…`;const interactionId=await createGeminiAudioSegment(segmentBlob,index,totalSegments,subject,title,date);const segmentResult=await pollInteraction(interactionId);transcript=String(segmentResult?.transcript||'').trim();if(transcript){segCache[index]=transcript;try{localStorage.setItem('lectureflow-seg-cache-v1',JSON.stringify({key:segCacheKey,segments:segCache}))}catch{}}}if(transcript)transcripts.push(`[Segment ${index+1} — ${Math.round(start)}s to ${Math.round(end)}s]\n${transcript}`);markStep(0,'active',`Segment ${index+1}/${totalSegments} complete`);await new Promise(r=>setTimeout(r,0))}
   if(!transcripts.length)throw new Error('Gemini could not extract speech from the recording.');return {transcript:transcripts.join('\n\n'),totalSegments,durationMinutes:durationMinutes||Math.max(1,Math.round(totalSeconds/60))};
 }
 async function uploadDirectToGemini(file,uploadUrl){
@@ -605,7 +605,8 @@ function normalizeGeneratedLecture(result,meta){
     transcript:String(result?.transcript||'')
   };
 }
-  async function finishLectureJob(result, meta){
+  async function finishLectureJob(result, meta){try{localStorage.removeItem('lectureflow-seg-cache-v1')}catch{}
+                                                
     clearPendingJob();
     markStep(2,'done','Notes complete');markStep(3,'done','Revision ready');markStep(4,'done','Questions ready');
     el('processMessage').textContent='Done – opening your lecture notes.';

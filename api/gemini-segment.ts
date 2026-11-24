@@ -22,7 +22,7 @@ const ALLOWED_AUDIO_TYPES = new Set([
   'audio/ogg', 'audio/aac', 'audio/flac', 'audio/aiff', 'audio/opus'
 ]);
 
-const DEFAULT_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview'];
+const DEFAULT_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview'];
 
 function getModelList() {
   const configured = (Netlify.env.get('LECTUREFLOW_GEMINI_MODELS') || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -60,7 +60,8 @@ export async function POST(req: Request) {
   let subject = 'Medicine';
   let title = 'Untitled lecture';
   let lectureDate = '';
-
+    let attempt = 0;
+  
   if (contentType.startsWith('audio/') || contentType.startsWith('application/octet-stream')) {
     const rawBytes = new Uint8Array(await req.arrayBuffer());
     if (!rawBytes.byteLength) return Response.json({ error: 'Missing segment audio.' }, { status: 400 });
@@ -71,7 +72,7 @@ export async function POST(req: Request) {
     totalSegments = Math.max(segment, Number(url.searchParams.get('totalSegments') || segment));
     subject = String(url.searchParams.get('subject') || 'Medicine').slice(0, 80);
     title = String(url.searchParams.get('title') || 'Untitled lecture').slice(0, 180);
-    lectureDate = String(url.searchParams.get('date') || '').slice(0, 20);
+    lectureDate = String(url.searchParams.get('date') || '').slice(0, 20); attempt = Math.max(0, Number(url.searchParams.get('attempt') || 0));
   } else {
     let body: any;
     try { body = await req.json(); } catch { return Response.json({ error: 'Invalid request body.' }, { status: 400 }); }
@@ -81,7 +82,7 @@ export async function POST(req: Request) {
     totalSegments = Math.max(segment, Number(body?.totalSegments || segment));
     subject = String(body?.subject || 'Medicine').slice(0, 80);
     title = String(body?.title || 'Untitled lecture').slice(0, 180);
-    lectureDate = String(body?.date || '').slice(0, 20);
+    lectureDate = String(body?.date || '').slice(0, 20); attempt = Math.max(0, Number(body?.attempt || 0));
   }
 
   if (!audioBase64) return Response.json({ error: 'Missing segment audio.' }, { status: 400 });
@@ -89,7 +90,7 @@ export async function POST(req: Request) {
   if (audioBase64.length > 5_200_000) return Response.json({ error: 'Segment audio is too large.' }, { status: 413 });
 
   const prompt = `Subject: ${subject}\nTitle: ${title}\nDate: ${lectureDate || 'Unspecified'}\nSegment: ${segment} of ${totalSegments}\n\n${SEGMENT_PROMPT}`;
-  const models = getModelList();
+  const baseModels = getModelList(); const offset = attempt % baseModels.length; const models = [...baseModels.slice(offset), ...baseModels.slice(0, offset)];
   let lastMessage = 'Gemini is temporarily unavailable.';
   const attemptedModels: string[] = [];
 
@@ -107,7 +108,7 @@ export async function POST(req: Request) {
       }), signal: AbortSignal.timeout(15000)
     });
     const data = await upstream.json().catch(() => null);
-    if (upstream.ok && data?.id) return Response.json({ interactionId: data.id, model, segment, totalSegments });
+    if (upstream.ok && data?.id) { console.log('gemini-segment started:', { segment, totalSegments, model, attempt }); return Response.json({ interactionId: data.id, model, segment, totalSegments }); }
     lastMessage = data?.error?.message || `Gemini returned HTTP ${upstream.status}.`;
     const retryable = upstream.status === 429 || upstream.status >= 500 || /high demand|overload|unavailable|resource exhausted|try again|capacity/i.test(lastMessage);
     if (!retryable) return Response.json({ error: lastMessage, attemptedModels }, { status: 502 });

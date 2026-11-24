@@ -104,10 +104,79 @@ const revisionOffsets = [0,1,7,30];
 
 const GOOGLE_CLIENT_ID = '14663212067-eb2lvc5qorg89vdgeod530ssaoaa2d1f.apps.googleusercontent.com';
 const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const DRIVE_TOKEN_STORAGE_KEY = 'lectureflow-drive-token-v1';
+const PENDING_JOB_STORAGE_KEY = 'lectureflow-pending-job-v1';
 let googleTokenClient = null;
 let googleAccessToken = null;
+let googleTokenExpiresAt = 0;
 let googleDriveConnected = false;
 let googleTokenWaiters = [];
+let activeWakeLock = null;
+let activeUploadInProgress = false;
+let pendingJobResuming = false;
+
+function saveDriveToken(token, expiresInSeconds){
+  const ttlMs = Math.max(300, Number(expiresInSeconds) || 3600) * 1000;
+  googleAccessToken = token;
+  googleTokenExpiresAt = Date.now() + ttlMs - 60000;
+  try{ localStorage.setItem(DRIVE_TOKEN_STORAGE_KEY, JSON.stringify({ token: googleAccessToken, expiresAt: googleTokenExpiresAt })); }catch{}
+}
+function loadStoredDriveToken(){
+  try{
+    const raw = localStorage.getItem(DRIVE_TOKEN_STORAGE_KEY);
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    if(parsed?.token && Number(parsed.expiresAt) > Date.now()){
+      googleAccessToken = parsed.token;
+      googleTokenExpiresAt = Number(parsed.expiresAt);
+      return googleAccessToken;
+    }
+    localStorage.removeItem(DRIVE_TOKEN_STORAGE_KEY);
+  }catch{}
+  googleAccessToken = null;
+  googleTokenExpiresAt = 0;
+  return null;
+}
+function clearStoredDriveToken(){
+  googleAccessToken = null;
+  googleTokenExpiresAt = 0;
+  try{ localStorage.removeItem(DRIVE_TOKEN_STORAGE_KEY); }catch{}
+}
+function hasValidDriveToken(){
+  if(googleAccessToken && googleTokenExpiresAt > Date.now()) return true;
+  return !!loadStoredDriveToken();
+}
+function savePendingJob(job){
+  try{ localStorage.setItem(PENDING_JOB_STORAGE_KEY, JSON.stringify({ ...job, updatedAt: Date.now() })); }catch{}
+}
+function loadPendingJob(){
+  try{
+    const raw = localStorage.getItem(PENDING_JOB_STORAGE_KEY);
+    if(!raw) return null;
+    const job = JSON.parse(raw);
+    if(!job || (Date.now() - Number(job.updatedAt || job.startedAt || 0)) > 20 * 60 * 1000){
+      localStorage.removeItem(PENDING_JOB_STORAGE_KEY);
+      return null;
+    }
+    return job;
+  }catch{ return null; }
+}
+function clearPendingJob(){
+  try{ localStorage.removeItem(PENDING_JOB_STORAGE_KEY); }catch{}
+}
+async function acquireWakeLock(){
+  try{
+    if('wakeLock' in navigator && !activeWakeLock){
+      activeWakeLock = await navigator.wakeLock.request('screen');
+      activeWakeLock.addEventListener?.('release', ()=>{ activeWakeLock = null; });
+    }
+  }catch{}
+}
+async function releaseWakeLock(){
+  try{
+    if(activeWakeLock){ await activeWakeLock.release(); activeWakeLock = null; }
+  }catch{ activeWakeLock = null; }
+}
 
 function initGoogleDriveAuth(){
   if(!window.google?.accounts?.oauth2) return false;
@@ -117,7 +186,7 @@ function initGoogleDriveAuth(){
     scope: GOOGLE_DRIVE_SCOPE,
     callback: (response)=>{
       if(response?.access_token){
-        googleAccessToken = response.access_token;
+        saveDriveToken(response.access_token, response.expires_in);
         googleDriveConnected = true;
         state.settings.googleDriveConnected = true;
         saveState();
@@ -135,7 +204,7 @@ function initGoogleDriveAuth(){
 }
 
 function requestGoogleDriveToken(prompt=''){
-  if(!initGoogleDriveAuth()) return Promise.reject(new Error('Google services are still loading — try again in a moment.'));
+  if(!initGoogleDriveAuth()) return Promise.reject(new Error('Google services are still loading – try again in a moment.'));
   return new Promise((resolve,reject)=>{
     googleTokenWaiters.push({resolve,reject});
     try{
@@ -147,26 +216,29 @@ function requestGoogleDriveToken(prompt=''){
 }
 
 async function ensureGoogleDriveAccess(){
-  if(googleAccessToken) return googleAccessToken;
+  if(hasValidDriveToken()) return googleAccessToken;
   if(!state.settings?.googleDriveConnected) throw new Error('Connect Google Drive first so LectureFlow can securely stage this file.');
   return requestGoogleDriveToken('');
 }
 
 async function restoreGoogleDriveConnection(){
   googleDriveConnected=!!state.settings?.googleDriveConnected;
-  if(!googleDriveConnected) return;
-  try{
-    await requestGoogleDriveToken('');
-  }catch(e){
-    googleAccessToken=null;
+  if(loadStoredDriveToken()){
     googleDriveConnected=true;
+    if(!state.settings.googleDriveConnected){
+      state.settings.googleDriveConnected=true;
+      saveState();
+    }
     renderSettings();
+    return;
   }
+  if(!googleDriveConnected) return;
+  renderSettings();
 }
 
 async function connectGoogleDrive(){
   if(!initGoogleDriveAuth()){
-    toast('Google services are still loading — try again in a moment.');
+    toast('Google services are still loading – try again in a moment.');
     return;
   }
   try{
@@ -176,6 +248,7 @@ async function connectGoogleDrive(){
     toast(err?.message||'Google Drive connection failed.');
   }
 }
+
 
 
 let state = loadState();
@@ -532,7 +605,96 @@ function normalizeGeneratedLecture(result,meta){
     transcript:String(result?.transcript||'')
   };
 }
-async function processLectureReal(){if(!uploadFile)return;const file=uploadFile,btn=el('processBtn');btn.disabled=true;renderProcessingSteps();const title=el('titleInput').value.trim(),subject=el('subjectInput').value,date=el('dateInput').value||getToday();try{const health=await fetch('/api/gemini-health').then(r=>r.json()).catch(()=>({ok:false}));if(!health.ok)throw new Error('Gemini is not active on this Vercel project yet. Make sure LECTUREFLOW_GEMINI_API_KEY is configured.');const duration=await getAudioDurationMinutes(file);const shouldSegment=file.size>3*1024*1024||duration>=15;let startPayload;if(shouldSegment){const segmented=await processAudioIntoTranscript(file,subject,title,date,duration);markStep(0,'done',`${segmented.totalSegments} segments transcribed`);setActiveStep(1,'Combining lecture transcript...');markStep(1,'done','Ready');startPayload={transcript:segmented.transcript,subject,title,date};}else{setActiveStep(0,'Creating secure upload...');const initRes=await fetch('/api/gemini-upload-init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:file.name,mimeType:normalizedAudioMime(file),size:file.size})});const init=await initRes.json();if(!initRes.ok)throw new Error(apiError(init,'Could not start audio upload'));const uploaded=await uploadDirectToGemini(file,init.uploadUrl);const fileInfo=uploaded?.file||uploaded;if(!fileInfo?.uri)throw new Error('Gemini uploaded the audio but did not return a file reference.');markStep(0,'done','Uploaded');setActiveStep(1,'Preparing audio...');if(fileInfo.name)await waitForGeminiFile(fileInfo.name);markStep(1,'done','Ready');startPayload={fileUri:fileInfo.uri,mimeType:fileInfo.mimeType||normalizedAudioMime(file),subject,title,date};}setActiveStep(2,'Gemini is listening...');const startRes=await fetch('/api/gemini-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(startPayload)});const started=await startRes.json();if(!startRes.ok||!started.interactionId)throw new Error(apiError(started,'Could not start lecture processing'));const result=await pollInteraction(started.interactionId);markStep(2,'done','Notes complete');markStep(3,'done','Revision ready');markStep(4,'done','Questions ready');el('processMessage').textContent='Done – opening your lecture notes.';const lecture=normalizeGeneratedLecture(result,{subject,title,date,duration,sourceFileName:file.name});state.lectures.unshift(lecture);state.processedTotal=(state.processedTotal||0)+1;saveState();uploadFile=null;toast('Lecture processed successfully');setTimeout(()=>openLecture(lecture.id),450);}catch(err){console.error(err);const active=[0,1,2,3,4].find(i=>el('ps'+i)?.classList.contains('active'));if(active!==undefined)markStep(active,'error','Stopped');el('processMessage').innerHTML=`<strong>Couldn't process this lecture.</strong><br>${escapeHtml(err?.message||'Unknown error')}<br><button class="outline-btn retry-btn" id="retryProcess">Try again</button>`;el('retryProcess')?.addEventListener('click',processLectureReal);btn.disabled=false;}}
+  async function finishLectureJob(result, meta){
+    clearPendingJob();
+    markStep(2,'done','Notes complete');markStep(3,'done','Revision ready');markStep(4,'done','Questions ready');
+    el('processMessage').textContent='Done – opening your lecture notes.';
+    const lecture=normalizeGeneratedLecture(result,meta);
+    state.lectures.unshift(lecture);state.processedTotal=(state.processedTotal||0)+1;saveState();uploadFile=null;
+    toast('Lecture processed successfully');setTimeout(()=>openLecture(lecture.id),450);
+  }
+  async function resumePendingLectureJob(){
+    if(activeUploadInProgress || pendingJobResuming) return;
+    const job = loadPendingJob();
+    if(!job) return;
+    pendingJobResuming = true;
+    try{
+      setHeader('upload');
+      renderProcessingSteps();
+      markStep(0,'done','Uploaded');
+      let interactionId = job.interactionId;
+      if(!interactionId && job.fileUri){
+        setActiveStep(1,'Resuming audio preparation...');
+        if(job.fileName) await waitForGeminiFile(job.fileName);
+        markStep(1,'done','Ready');
+        setActiveStep(2,'Resuming Gemini processing...');
+        const startRes=await fetch('/api/gemini-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileUri:job.fileUri,mimeType:job.mimeType,subject:job.subject,title:job.title,date:job.date})});
+        const started=await startRes.json();if(!startRes.ok||!started.interactionId)throw new Error(apiError(started,'Could not resume lecture processing'));
+        interactionId = started.interactionId;
+        savePendingJob({...job, phase:'interaction', interactionId});
+      }else{
+        markStep(1,'done','Ready');
+        setActiveStep(2,'Resuming Gemini processing...');
+      }
+      if(!interactionId){ clearPendingJob(); return; }
+      const result = await pollInteraction(interactionId);
+      await finishLectureJob(result,{subject:job.subject,title:job.title,date:job.date,duration:job.duration,sourceFileName:job.sourceFileName});
+    }catch(err){
+      console.error(err);
+      clearPendingJob();
+      const active=[0,1,2,3,4].find(i=>el('ps'+i)?.classList.contains('active'));if(active!==undefined)markStep(active,'error','Stopped');
+      if(el('processMessage')) el('processMessage').innerHTML=`<strong>Couldn't finish background processing.</strong><br>${escapeHtml(err?.message||'Unknown error')}`;
+    }finally{
+      pendingJobResuming = false;
+    }
+  }
+  async function processLectureReal(){
+    if(!uploadFile)return;
+    const file=uploadFile,btn=el('processBtn');btn.disabled=true;renderProcessingSteps();
+    const title=el('titleInput').value.trim(),subject=el('subjectInput').value,date=el('dateInput').value||getToday();
+    activeUploadInProgress = true;
+    acquireWakeLock();
+    try{
+      const health=await fetch('/api/gemini-health').then(r=>r.json()).catch(()=>({ok:false}));
+      if(!health.ok)throw new Error('Gemini is not active on this Vercel project yet. Make sure LECTUREFLOW_GEMINI_API_KEY is configured.');
+      const duration=await getAudioDurationMinutes(file);
+      const shouldSegment=file.size>3*1024*1024||duration>=15;
+      let startPayload;
+      if(shouldSegment){
+        const segmented=await processAudioIntoTranscript(file,subject,title,date,duration);
+        markStep(0,'done',`${segmented.totalSegments} segments transcribed`);
+        setActiveStep(1,'Combining lecture transcript...');
+        markStep(1,'done','Ready');
+        startPayload={transcript:segmented.transcript,subject,title,date};
+      }else{
+        setActiveStep(0,'Creating secure upload...');
+        const initRes=await fetch('/api/gemini-upload-init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:file.name,mimeType:normalizedAudioMime(file),size:file.size})});
+        const init=await initRes.json();if(!initRes.ok)throw new Error(apiError(init,'Could not start audio upload'));
+        const uploaded=await uploadDirectToGemini(file,init.uploadUrl);
+        const fileInfo=uploaded?.file||uploaded;
+        if(!fileInfo?.uri)throw new Error('Gemini uploaded the audio but did not return a file reference.');
+        markStep(0,'done','Uploaded');
+        savePendingJob({phase:'file',fileName:fileInfo.name||'',fileUri:fileInfo.uri,mimeType:fileInfo.mimeType||normalizedAudioMime(file),subject,title,date,duration,sourceFileName:file.name,startedAt:Date.now()});
+        setActiveStep(1,'Preparing audio...');
+        if(fileInfo.name)await waitForGeminiFile(fileInfo.name);
+        markStep(1,'done','Ready');
+        startPayload={fileUri:fileInfo.uri,mimeType:fileInfo.mimeType||normalizedAudioMime(file),subject,title,date};
+      }
+      setActiveStep(2,'Gemini is listening...');
+      const startRes=await fetch('/api/gemini-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(startPayload)});
+      const started=await startRes.json();if(!startRes.ok||!started.interactionId)throw new Error(apiError(started,'Could not start lecture processing'));
+      savePendingJob({phase:'interaction',interactionId:started.interactionId,subject,title,date,duration,sourceFileName:file.name,startedAt:Date.now()});
+      const result=await pollInteraction(started.interactionId);
+      await finishLectureJob(result,{subject,title,date,duration,sourceFileName:file.name});
+    }catch(err){
+      console.error(err);clearPendingJob();const active=[0,1,2,3,4].find(i=>el('ps'+i)?.classList.contains('active'));if(active!==undefined)markStep(active,'error','Stopped');
+      el('processMessage').innerHTML=`<strong>Couldn't process this lecture.</strong><br>${escapeHtml(err?.message||'Unknown error')}<br><button class="outline-btn retry-btn" id="retryProcess">Try again</button>`;
+      el('retryProcess')?.addEventListener('click',processLectureReal);btn.disabled=false;
+    }finally{
+      activeUploadInProgress = false;
+      releaseWakeLock();
+    }
+  }
    
 
 
@@ -705,3 +867,14 @@ el('sideStreak').textContent=`${state.streak} day streak`;
 setHeader('today');
 renderToday();
 setTimeout(()=>{initGoogleDriveAuth();restoreGoogleDriveConnection();},300);
+setTimeout(()=>{resumePendingLectureJob();},500);
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'){
+    if(loadStoredDriveToken()){ googleDriveConnected=true; renderSettings(); }
+    if(activeUploadInProgress) acquireWakeLock();
+    else resumePendingLectureJob();
+  }
+});
+window.addEventListener('beforeunload',(e)=>{
+  if(activeUploadInProgress){ e.preventDefault(); e.returnValue=''; }
+});

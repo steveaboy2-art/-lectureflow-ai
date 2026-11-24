@@ -287,17 +287,18 @@ export async function POST(req: Request) {
     const model = models[index];
     attemptedModels.push(model);
 
-    const upstream = await fetch(endpoint, {
+    let upstream: Response; try { upstream = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'x-goog-api-key': apiKey,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model,
+        model, background: true, store: true,
         ...requestPayload
-      })
-    });
+      }), signal: AbortSignal.timeout(15000)
+    }); } catch (err: any) { lastMessage = err?.message || 'Gemini request timed out.'; continue; }
+  
 
     const data = await upstream.json().catch(() => ({}));
 

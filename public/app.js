@@ -446,7 +446,7 @@ function encodeAudioSegment(audioBuffer,startSeconds,endSeconds){
   const blob=new Blob(chunks,{type:'audio/mpeg'});if(blob.size>AUDIO_SEGMENT_MAX_BYTES)throw new Error('Generated audio segment was unexpectedly large.');return blob;
 }
 async function blobToBase64(blob){const bytes=new Uint8Array(await blob.arrayBuffer());let binary='';const sliceSize=0x8000;for(let i=0;i<bytes.length;i+=sliceSize)binary+=String.fromCharCode(...bytes.subarray(i,Math.min(i+sliceSize,bytes.length)));return btoa(binary)}
-async function createGeminiAudioSegment(blob,index,total,subject,title,date){const params=new URLSearchParams({segment:String(index+1),totalSegments:String(total),subject,title,date});const res=await fetch('/api/gemini-segment?'+params.toString(),{method:'POST',headers:{'Content-Type':'audio/mp3'},body:blob});const data=await res.json().catch(()=>({}));if(!res.ok||!data.interactionId){const detail=data?.error||data?.detail?.error?.message||data?.detail||'';throw new Error(detail||'Could not start audio segment '+(index+1));}return data.interactionId}
+async function createGeminiAudioSegment(blob,index,total,subject,title,date){const params=new URLSearchParams({segment:String(index+1),totalSegments:String(total),subject,title,date});let lastError=null;for(let attempt=0;attempt<3;attempt++){try{const res=await fetch('/api/gemini-segment?'+params.toString(),{method:'POST',headers:{'Content-Type':'audio/mpeg'},body:blob});const data=await res.json().catch(()=>({}));if(res.ok&&data.interactionId)return data.interactionId;const detail=data?.error||data?.detail?.error?.message||data?.detail||'';lastError=new Error(detail||'Could not start audio segment '+(index+1));if(res.status!==429&&res.status<500)throw lastError;}catch(err){lastError=err;if(attempt===2)throw err;}await sleep(500*(attempt+1));}throw lastError||new Error('Could not start audio segment '+(index+1));}
 async function processAudioIntoTranscript(file,subject,title,date,durationMinutes){
   if(!window.lamejs?.Mp3Encoder)throw new Error('MP3 encoder unavailable. Refresh once and try again.');
   setActiveStep(0,'Decoding and splitting the recording automatically…');const audioBuffer=await decodeUploadedAudio(file),totalSeconds=audioBuffer.duration;
@@ -532,39 +532,8 @@ function normalizeGeneratedLecture(result,meta){
     transcript:String(result?.transcript||'')
   };
 }
-async function processLectureReal(){
-  if(!uploadFile)return;
-  const file=uploadFile,btn=el('processBtn');btn.disabled=true;renderProcessingSteps();
-  const title=el('titleInput').value.trim(),subject=el('subjectInput').value,date=el('dateInput').value||getToday();
-  try{
-    const health=await fetch('/api/gemini-health').then(r=>r.json()).catch(()=>({ok:false}));
-    if(!health.ok)throw new Error('Gemini is not active on this Vercel project yet. Make sure LECTUREFLOW_GEMINI_API_KEY is configured.');
-    const duration=await getAudioDurationMinutes(file);
-    setActiveStep(0,'Creating secure upload…');
-    const initRes=await fetch('/api/gemini-upload-init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:file.name,mimeType:normalizedAudioMime(file),size:file.size})});
-    const init=await initRes.json();if(!initRes.ok)throw new Error(apiError(init,'Could not start audio upload'));
-    const uploaded=await uploadDirectToGemini(file,init.uploadUrl);
-    const fileInfo=uploaded?.file||uploaded;
-    if(!fileInfo?.uri)throw new Error('Gemini uploaded the audio but did not return a file reference.');
-    markStep(0,'done','Uploaded');
-    setActiveStep(1,'Preparing audio…');
-    if(fileInfo.name)await waitForGeminiFile(fileInfo.name);
-    markStep(1,'done','Ready');
-    setActiveStep(2,'Gemini is listening…');
-    const startRes=await fetch('/api/gemini-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileUri:fileInfo.uri,mimeType:fileInfo.mimeType||normalizedAudioMime(file),subject,title,date})});
-    const started=await startRes.json();if(!startRes.ok||!started.interactionId)throw new Error(apiError(started,'Could not start lecture processing'));
-    const result=await pollInteraction(started.interactionId);
-    markStep(2,'done','Notes complete');markStep(3,'done','Revision ready');markStep(4,'done','Questions ready');
-    el('processMessage').textContent='Done — opening your lecture notes.';
-    const lecture=normalizeGeneratedLecture(result,{subject,title,date,duration,sourceFileName:file.name});
-    state.lectures.unshift(lecture);state.processedTotal=(state.processedTotal||0)+1;saveState();uploadFile=null;
-    toast('Lecture processed successfully');setTimeout(()=>openLecture(lecture.id),450);
-  }catch(err){
-    console.error(err);const active=[0,1,2,3,4].find(i=>el('ps'+i)?.classList.contains('active'));if(active!==undefined)markStep(active,'error','Stopped');
-    el('processMessage').innerHTML=`<strong>Couldn’t process this lecture.</strong><br>${escapeHtml(err?.message||'Unknown error')}<br><button class="outline-btn retry-btn" id="retryProcess">Try again</button>`;
-    el('retryProcess')?.addEventListener('click',processLectureReal);btn.disabled=false;
-  }
-}
+async function processLectureReal(){if(!uploadFile)return;const file=uploadFile,btn=el('processBtn');btn.disabled=true;renderProcessingSteps();const title=el('titleInput').value.trim(),subject=el('subjectInput').value,date=el('dateInput').value||getToday();try{const health=await fetch('/api/gemini-health').then(r=>r.json()).catch(()=>({ok:false}));if(!health.ok)throw new Error('Gemini is not active on this Vercel project yet. Make sure LECTUREFLOW_GEMINI_API_KEY is configured.');const duration=await getAudioDurationMinutes(file);const shouldSegment=file.size>3*1024*1024||duration>=15;let startPayload;if(shouldSegment){const segmented=await processAudioIntoTranscript(file,subject,title,date,duration);markStep(0,'done',`${segmented.totalSegments} segments transcribed`);setActiveStep(1,'Combining lecture transcript...');markStep(1,'done','Ready');startPayload={transcript:segmented.transcript,subject,title,date};}else{setActiveStep(0,'Creating secure upload...');const initRes=await fetch('/api/gemini-upload-init',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fileName:file.name,mimeType:normalizedAudioMime(file),size:file.size})});const init=await initRes.json();if(!initRes.ok)throw new Error(apiError(init,'Could not start audio upload'));const uploaded=await uploadDirectToGemini(file,init.uploadUrl);const fileInfo=uploaded?.file||uploaded;if(!fileInfo?.uri)throw new Error('Gemini uploaded the audio but did not return a file reference.');markStep(0,'done','Uploaded');setActiveStep(1,'Preparing audio...');if(fileInfo.name)await waitForGeminiFile(fileInfo.name);markStep(1,'done','Ready');startPayload={fileUri:fileInfo.uri,mimeType:fileInfo.mimeType||normalizedAudioMime(file),subject,title,date};}setActiveStep(2,'Gemini is listening...');const startRes=await fetch('/api/gemini-start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(startPayload)});const started=await startRes.json();if(!startRes.ok||!started.interactionId)throw new Error(apiError(started,'Could not start lecture processing'));const result=await pollInteraction(started.interactionId);markStep(2,'done','Notes complete');markStep(3,'done','Revision ready');markStep(4,'done','Questions ready');el('processMessage').textContent='Done – opening your lecture notes.';const lecture=normalizeGeneratedLecture(result,{subject,title,date,duration,sourceFileName:file.name});state.lectures.unshift(lecture);state.processedTotal=(state.processedTotal||0)+1;saveState();uploadFile=null;toast('Lecture processed successfully');setTimeout(()=>openLecture(lecture.id),450);}catch(err){console.error(err);const active=[0,1,2,3,4].find(i=>el('ps'+i)?.classList.contains('active'));if(active!==undefined)markStep(active,'error','Stopped');el('processMessage').innerHTML=`<strong>Couldn't process this lecture.</strong><br>${escapeHtml(err?.message||'Unknown error')}<br><button class="outline-btn retry-btn" id="retryProcess">Try again</button>`;el('retryProcess')?.addEventListener('click',processLectureReal);btn.disabled=false;}}
+   
 
 
 function renderLibrary(){

@@ -22,7 +22,7 @@ const ALLOWED_AUDIO_TYPES = new Set([
   'audio/ogg', 'audio/aac', 'audio/flac', 'audio/aiff', 'audio/opus'
 ]);
 
-const DEFAULT_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview'];
+const DEFAULT_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview'];
 
 function getModelList() {
   const configured = (Netlify.env.get('LECTUREFLOW_GEMINI_MODELS') || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -96,21 +96,23 @@ export async function POST(req: Request) {
   for (let index = 0; index < models.length; index++) {
     const model = models[index];
     attemptedModels.push(model);
-    const upstream = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+    try {
+      const upstream = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
       method: 'POST',
       headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model,
+        model, background: true, store: true,
         input: [{ type: 'text', text: prompt }, { type: 'audio', data: audioBase64, mime_type: mimeType }],
         response_format: { type: 'text', mime_type: 'application/json', schema: SEGMENT_SCHEMA }
-      })
+      }), signal: AbortSignal.timeout(15000)
     });
     const data = await upstream.json().catch(() => null);
     if (upstream.ok && data?.id) return Response.json({ interactionId: data.id, model, segment, totalSegments });
     lastMessage = data?.error?.message || `Gemini returned HTTP ${upstream.status}.`;
     const retryable = upstream.status === 429 || upstream.status >= 500 || /high demand|overload|unavailable|resource exhausted|try again|capacity/i.test(lastMessage);
     if (!retryable) return Response.json({ error: lastMessage, attemptedModels }, { status: 502 });
-    if (index < models.length - 1) await new Promise(resolve => setTimeout(resolve, 500 * (index + 1)));
+    } catch (err: any) { lastMessage = err?.message || 'Gemini request timed out.'; }
+  if (index < models.length - 1) await new Promise(resolve => setTimeout(resolve, 500 * (index + 1)));
   }
 
   return Response.json({ error: lastMessage, attemptedModels }, { status: 503 });

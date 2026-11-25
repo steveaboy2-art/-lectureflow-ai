@@ -498,8 +498,8 @@ async function getAudioDurationMinutes(file){
     audio.preload='metadata';audio.onloadedmetadata=()=>finish(Number.isFinite(audio.duration)?Math.max(1,Math.round(audio.duration/60)):0);audio.onerror=()=>finish(0);audio.src=url;setTimeout(()=>finish(0),3500);
   });
 }
-const AUDIO_SEGMENT_SECONDS=180;
-const AUDIO_SEGMENT_BITRATE=64;
+const AUDIO_SEGMENT_SECONDS=120;
+const AUDIO_SEGMENT_BITRATE=32;
 const AUDIO_SEGMENT_MAX_BYTES=1800000;
 
 async function decodeUploadedAudio(file){
@@ -508,25 +508,25 @@ async function decodeUploadedAudio(file){
   const ctx=new AudioContextClass();
   try{return await ctx.decodeAudioData(await file.arrayBuffer());}finally{try{await ctx.close()}catch{}}
 }
-function encodeAudioSegment(audioBuffer,startSeconds,endSeconds){
-  const sampleRate=Math.round(audioBuffer.sampleRate),start=Math.max(0,Math.floor(startSeconds*sampleRate)),end=Math.min(audioBuffer.length,Math.ceil(endSeconds*sampleRate)),length=Math.max(0,end-start);
-  if(!length)throw new Error('Audio segment was empty.');
-  const encoder=new window.lamejs.Mp3Encoder(1,sampleRate,AUDIO_SEGMENT_BITRATE),channels=audioBuffer.numberOfChannels,channelData=[];
-  for(let c=0;c<channels;c++){const data=new Float32Array(length);audioBuffer.copyFromChannel(data,c,start);channelData.push(data)}
-  const chunks=[],blockSize=1152;
-  for(let offset=0;offset<length;offset+=blockSize){const n=Math.min(blockSize,length-offset),pcm=new Int16Array(n);for(let i=0;i<n;i++){let sample=0;for(let c=0;c<channels;c++)sample+=channelData[c][offset+i]||0;sample/=Math.max(1,channels);sample=Math.max(-1,Math.min(1,sample));pcm[i]=sample<0?sample*0x8000:sample*0x7fff}const encoded=encoder.encodeBuffer(pcm);if(encoded.length)chunks.push(new Uint8Array(encoded))}
-  const finalBytes=encoder.flush();if(finalBytes?.length)chunks.push(new Uint8Array(finalBytes));
-  const blob=new Blob(chunks,{type:'audio/mpeg'});if(blob.size>AUDIO_SEGMENT_MAX_BYTES)throw new Error('Generated audio segment was unexpectedly large.');return blob;
+function encodeAudioSegment(audioBuffer,startSeconds,endSeconds){const srcRate=Math.round(audioBuffer.sampleRate),targetRate=srcRate>16000?16000:srcRate;const start=Math.max(0,Math.floor(startSeconds*srcRate)),end=Math.min(audioBuffer.length,Math.ceil(endSeconds*srcRate)),srcLen=Math.max(0,end-start);if(!srcLen)throw new Error('Audio segment was empty.');const channels=audioBuffer.numberOfChannels,channelData=[];for(let c=0;c<channels;c++){const data=new Float32Array(srcLen);audioBuffer.copyFromChannel(data,c,start);channelData.push(data)}const ratio=srcRate/targetRate,outLen=Math.max(1,Math.floor(srcLen/ratio));const encoder=new window.lamejs.Mp3Encoder(1,targetRate,AUDIO_SEGMENT_BITRATE),chunks=[],blockSize=1152;for(let outOff=0;outOff<outLen;outOff+=blockSize){const n=Math.min(blockSize,outLen-outOff),pcm=new Int16Array(n);for(let i=0;i<n;i++){const srcIdx=Math.min(srcLen-1,Math.floor((outOff+i)*ratio));let sample=0;for(let c=0;c<channels;c++)sample+=channelData[c][srcIdx]||0;sample/=Math.max(1,channels);sample=Math.max(-1,Math.min(1,sample));pcm[i]=sample<0?sample*0x8000:sample*0x7fff;}const encoded=encoder.encodeBuffer(pcm);if(encoded.length)chunks.push(new Uint8Array(encoded));}const finalBytes=encoder.flush();if(finalBytes?.length)chunks.push(new Uint8Array(finalBytes));const blob=new Blob(chunks,{type:'audio/mpeg'});if(blob.size>AUDIO_SEGMENT_MAX_BYTES)throw new Error('Generated audio segment was unexpectedly large.');return blob;
+   
+   
+   
+   
+   
+   
+   
+   
 }
 async function blobToBase64(blob){const bytes=new Uint8Array(await blob.arrayBuffer());let binary='';const sliceSize=0x8000;for(let i=0;i<bytes.length;i+=sliceSize)binary+=String.fromCharCode(...bytes.subarray(i,Math.min(i+sliceSize,bytes.length)));return btoa(binary)}
 async function createGeminiAudioSegment(blob,index,total,subject,title,date,attempt=0){const params=new URLSearchParams({segment:String(index+1),totalSegments:String(total),subject,title,date,attempt:String(attempt)});let lastError=null;for(let attempt=0;attempt<3;attempt++){try{const res=await fetch('/api/gemini-segment?'+params.toString(),{method:'POST',headers:{'Content-Type':'audio/mpeg'},body:blob});const data=await res.json().catch(()=>({}));if(res.ok&&(typeof data.transcript==='string'||data.interactionId))return data;const detail=data?.error||data?.detail?.error?.message||data?.detail||'';lastError=new Error(detail||'Could not start audio segment '+(index+1));if(res.status!==429&&res.status<500)throw lastError;}catch(err){lastError=err;if(attempt===2)throw err;}await sleep(500*(attempt+1));}throw lastError||new Error('Could not start audio segment '+(index+1));}
-async function processAudioIntoTranscript(file,subject,title,date,durationMinutes){
-  if(!window.lamejs?.Mp3Encoder)throw new Error('MP3 encoder unavailable. Refresh once and try again.');
-  setActiveStep(0,'Decoding and splitting the recording automatically…');const audioBuffer=await decodeUploadedAudio(file),totalSeconds=audioBuffer.duration;
-  if(!Number.isFinite(totalSeconds)||totalSeconds<=0)throw new Error('Could not determine the recording duration.');
-  const totalSegments=Math.ceil(totalSeconds/AUDIO_SEGMENT_SECONDS),transcripts=[],segCacheKey=`${file.name}:${file.size}:${file.lastModified}`;let segCache={};try{const raw=JSON.parse(localStorage.getItem('lectureflow-seg-cache-v1')||'null');if(raw&&raw.key===segCacheKey&&raw.segments)segCache=raw.segments}catch{}
-  for(let index=0;index<totalSegments;index++){const start=index*AUDIO_SEGMENT_SECONDS,end=Math.min(totalSeconds,start+AUDIO_SEGMENT_SECONDS);let transcript=typeof segCache[index]==='string'?segCache[index]:'';if(!transcript){el('processMessage').textContent=`Preparing segment ${index+1}/${totalSegments} automatically…`;const segmentBlob=encodeAudioSegment(audioBuffer,start,end);el('processMessage').textContent=`Uploading and transcribing segment ${index+1}/${totalSegments}…`;let segmentResult;for(let segAttempt=0;segAttempt<4;segAttempt++){try{const segData=await createGeminiAudioSegment(segmentBlob,index,totalSegments,subject,title,date,segAttempt);segmentResult=typeof segData.transcript==='string'?segData:await pollInteraction(segData.interactionId);break;}catch(err){if(segAttempt===3)throw err;el('processMessage').textContent=`Retrying segment ${index+1}/${totalSegments} with backup model...`;await sleep(1500*(segAttempt+1));}}transcript=String(segmentResult?.transcript||'').trim();if(transcript){segCache[index]=transcript;try{localStorage.setItem('lectureflow-seg-cache-v1',JSON.stringify({key:segCacheKey,segments:segCache}))}catch{}}}if(transcript)transcripts.push(`[Segment ${index+1} — ${Math.round(start)}s to ${Math.round(end)}s]\n${transcript}`);markStep(0,'active',`Segment ${index+1}/${totalSegments} complete`);await new Promise(r=>setTimeout(r,0))}
-  if(!transcripts.length)throw new Error('Gemini could not extract speech from the recording.');return {transcript:transcripts.join('\n\n'),totalSegments,durationMinutes:durationMinutes||Math.max(1,Math.round(totalSeconds/60))};
+async function processAudioIntoTranscript(file,subject,title,date,durationMinutes){if(!window.lamejs?.Mp3Encoder)throw new Error('MP3 encoder unavailable. Refresh once and try again.');setActiveStep(0,'Decoding and splitting the recording automatically...');const audioBuffer=await decodeUploadedAudio(file),totalSeconds=audioBuffer.duration;if(!Number.isFinite(totalSeconds)||totalSeconds<=0)throw new Error('Could not determine the recording duration.');const totalSegments=Math.ceil(totalSeconds/AUDIO_SEGMENT_SECONDS),ordered=new Array(totalSegments).fill(''),segCacheKey=`${file.name}:${file.size}:${file.lastModified}:v2`;let segCache={};try{const raw=JSON.parse(localStorage.getItem('lectureflow-seg-cache-v1')||'null');if(raw&&raw.key===segCacheKey&&raw.segments)segCache=raw.segments}catch{}let nextIndex=0,completed=0;const updateProgress=()=>{const pct=Math.round((completed/totalSegments)*100);el('processMessage').textContent=`Transcribing segments... ${completed}/${totalSegments} (${pct}%)`;markStep(0,'active',`${completed}/${totalSegments} segments (${pct}%)`);};updateProgress();async function worker(){while(true){const index=nextIndex++;if(index>=totalSegments)return;const start=index*AUDIO_SEGMENT_SECONDS,end=Math.min(totalSeconds,start+AUDIO_SEGMENT_SECONDS);let transcript=typeof segCache[index]==='string'?segCache[index]:null;if(transcript===null){const segmentBlob=encodeAudioSegment(audioBuffer,start,end);let segmentResult;for(let segAttempt=0;segAttempt<4;segAttempt++){try{const segData=await createGeminiAudioSegment(segmentBlob,index,totalSegments,subject,title,date,segAttempt);segmentResult=typeof segData.transcript==='string'?segData:await pollInteraction(segData.interactionId);break;}catch(err){if(segAttempt===3)throw err;await sleep(1500*(segAttempt+1));}}transcript=String(segmentResult?.transcript||'').trim();segCache[index]=transcript;try{localStorage.setItem('lectureflow-seg-cache-v1',JSON.stringify({key:segCacheKey,segments:segCache}))}catch{}}if(transcript)ordered[index]=`[Segment ${index+1} – ${Math.round(start)}s to ${Math.round(end)}s]\x0a${transcript}`;completed++;updateProgress();}}const CONCURRENCY=Math.min(3,totalSegments);await Promise.all(Array.from({length:CONCURRENCY},()=>worker()));const transcripts=ordered.filter(Boolean);if(!transcripts.length)throw new Error('Gemini could not extract speech from the recording.');return {transcript:transcripts.join('\x0a\x0a'),totalSegments,durationMinutes:durationMinutes||Math.max(1,Math.round(totalSeconds/60))};
+   
+   
+   
+   
+   
+   
 }
 async function uploadDirectToGemini(file,uploadUrl){
   // Relay 3 MB chunks through our server to avoid Safari/iOS CORS and
